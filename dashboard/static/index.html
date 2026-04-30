@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bot Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0f1117; color: #e2e8f0; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px; }
+
+    header {
+      background: #1a1d27;
+      border-bottom: 1px solid #2d3148;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    header h1 { font-size: 18px; font-weight: 600; color: #fff; letter-spacing: 0.5px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    .updated { margin-left: auto; color: #64748b; font-size: 11px; }
+
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 20px 24px; }
+    .full { grid-column: 1 / -1; }
+
+    .card {
+      background: #1a1d27;
+      border: 1px solid #2d3148;
+      border-radius: 10px;
+      padding: 18px 20px;
+    }
+    .card-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #64748b;
+      margin-bottom: 14px;
+    }
+
+    .stat-row { display: flex; gap: 24px; flex-wrap: wrap; }
+    .stat { display: flex; flex-direction: column; gap: 4px; }
+    .stat-label { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.8px; }
+    .stat-value { font-size: 22px; font-weight: 700; color: #fff; }
+    .stat-value.green { color: #22c55e; }
+    .stat-value.red   { color: #ef4444; }
+    .stat-value.blue  { color: #60a5fa; }
+
+    .chart-wrap { position: relative; height: 180px; }
+
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; padding: 6px 10px; color: #64748b; font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; border-bottom: 1px solid #2d3148; }
+    td { padding: 8px 10px; border-bottom: 1px solid #1e2135; font-size: 12px; vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    .badge {
+      display: inline-block; padding: 2px 7px; border-radius: 4px;
+      font-size: 10px; font-weight: 600; text-transform: uppercase;
+    }
+    .badge.won  { background: #14532d; color: #22c55e; }
+    .badge.lost { background: #450a0a; color: #ef4444; }
+    .badge.open { background: #1e3a5f; color: #60a5fa; }
+    .badge.buy  { background: #14532d; color: #22c55e; }
+    .badge.sell { background: #450a0a; color: #ef4444; }
+    .badge.hold { background: #1e2135; color: #94a3b8; }
+
+    .log-box {
+      background: #0d0f18;
+      border-radius: 6px;
+      padding: 12px;
+      height: 200px;
+      overflow-y: auto;
+      font-size: 11px;
+      line-height: 1.6;
+      color: #94a3b8;
+    }
+    .log-box .warn  { color: #f59e0b; }
+    .log-box .error { color: #ef4444; }
+    .log-box .info  { color: #94a3b8; }
+
+    .proba-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin: 8px 0; }
+    .proba-sell { background: #ef4444; }
+    .proba-hold { background: #64748b; }
+    .proba-buy  { background: #22c55e; }
+    .proba-labels { display: flex; justify-content: space-between; font-size: 10px; color: #64748b; }
+
+    .tab-bar { display: flex; gap: 2px; margin-bottom: 14px; }
+    .tab {
+      padding: 5px 14px; border-radius: 5px; cursor: pointer;
+      color: #64748b; font-size: 11px; background: none; border: none;
+    }
+    .tab.active { background: #2d3148; color: #e2e8f0; }
+
+    .reasoning { color: #64748b; font-size: 11px; font-style: italic; margin-top: 2px; }
+    .empty { color: #475569; text-align: center; padding: 24px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="dot"></div>
+  <h1>Bot Dashboard</h1>
+  <span class="updated" id="updated">–</span>
+</header>
+
+<div class="grid">
+
+  <!-- Betting Summary -->
+  <div class="card">
+    <div class="card-title">Sports Betting Bot</div>
+    <div class="stat-row">
+      <div class="stat">
+        <span class="stat-label">Bankroll</span>
+        <span class="stat-value blue" id="b-bankroll">–</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">P&L</span>
+        <span class="stat-value" id="b-pnl">–</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">ROI</span>
+        <span class="stat-value" id="b-roi">–</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Record</span>
+        <span class="stat-value" id="b-record">–</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Open Bets</span>
+        <span class="stat-value" id="b-open">–</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Trading Summary -->
+  <div class="card">
+    <div class="card-title">Crypto Trading Bot</div>
+    <div class="stat-row">
+      <div class="stat">
+        <span class="stat-label">Equity</span>
+        <span class="stat-value blue" id="t-equity">–</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">P&L</span>
+        <span class="stat-value" id="t-pnl">–</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Drawdown</span>
+        <span class="stat-value" id="t-drawdown">–</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Signal</span>
+        <span class="stat-value" id="t-signal">–</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Confidence</span>
+        <span class="stat-value" id="t-confidence">–</span>
+      </div>
+    </div>
+    <div style="margin-top:14px">
+      <div class="proba-labels">
+        <span id="p-sell">SELL –</span>
+        <span id="p-hold">HOLD –</span>
+        <span id="p-buy">BUY –</span>
+      </div>
+      <div class="proba-bar">
+        <div class="proba-sell" id="pb-sell" style="width:33%"></div>
+        <div class="proba-hold" id="pb-hold" style="width:34%"></div>
+        <div class="proba-buy"  id="pb-buy"  style="width:33%"></div>
+      </div>
+    </div>
+    <div class="stat-row" style="margin-top:14px; padding-top:12px; border-top:1px solid #2d3148">
+      <div class="stat">
+        <span class="stat-label">MCC</span>
+        <span class="stat-value" style="font-size:15px" id="t-mcc">–</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Sharpe</span>
+        <span class="stat-value" style="font-size:15px" id="t-sharpe">–</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Threshold</span>
+        <span class="stat-value" style="font-size:15px" id="t-threshold">–</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Trained on</span>
+        <span class="stat-value" style="font-size:15px" id="t-ntrain">–</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Betting Equity Chart -->
+  <div class="card">
+    <div class="card-title">Betting Bankroll</div>
+    <div class="chart-wrap"><canvas id="bettingChart"></canvas></div>
+  </div>
+
+  <!-- Trading Equity Chart -->
+  <div class="card">
+    <div class="card-title">Trading Equity</div>
+    <div class="chart-wrap"><canvas id="tradingChart"></canvas></div>
+  </div>
+
+  <!-- Open Bets -->
+  <div class="card">
+    <div class="card-title">Open Bets</div>
+    <div id="open-bets-body">
+      <div class="empty">No open bets</div>
+    </div>
+  </div>
+
+  <!-- Recent Bets -->
+  <div class="card">
+    <div class="card-title">Bet History</div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead>
+          <tr>
+            <th>Game</th>
+            <th>Type</th>
+            <th>Odds</th>
+            <th>Stake</th>
+            <th>P&L</th>
+            <th>Result</th>
+          </tr>
+        </thead>
+        <tbody id="history-body">
+          <tr><td colspan="6" class="empty">No settled bets yet</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Logs -->
+  <div class="card full">
+    <div class="card-title">Live Logs</div>
+    <div class="tab-bar">
+      <button class="tab active" onclick="switchLog('betting', this)">Betting Bot</button>
+      <button class="tab" onclick="switchLog('trading', this)">Trading Bot</button>
+    </div>
+    <div class="log-box" id="log-box"></div>
+  </div>
+
+</div>
+
+<script>
+let currentLog = 'betting';
+let bettingChart, tradingChart;
+
+function fmt(v, prefix='$') {
+  return prefix + Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function signedFmt(v) {
+  const s = v >= 0 ? '+' : '';
+  return s + fmt(v);
+}
+function colorClass(v) { return v >= 0 ? 'green' : 'red'; }
+
+function switchLog(type, btn) {
+  currentLog = type;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  fetchLog();
+}
+
+function renderLog(lines) {
+  const box = document.getElementById('log-box');
+  box.innerHTML = lines.map(l => {
+    let cls = 'info';
+    if (l.includes('WARNING') || l.includes('CIRCUIT BREAKER')) cls = 'warn';
+    if (l.includes('ERROR')) cls = 'error';
+    return `<div class="${cls}">${l.replace(/</g,'&lt;').trimEnd()}</div>`;
+  }).join('');
+  box.scrollTop = box.scrollHeight;
+}
+
+function makeChart(id, label, color) {
+  const ctx = document.getElementById(id).getContext('2d');
+  return new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [{
+        label, data: [], borderColor: color,
+        backgroundColor: color + '18',
+        borderWidth: 2, pointRadius: 0, fill: true, tension: 0.3,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { display: false },
+        y: {
+          grid: { color: '#1e2135' },
+          ticks: { color: '#64748b', font: { size: 10 } }
+        }
+      }
+    }
+  });
+}
+
+async function fetchBetting() {
+  const [summary, equity, open, history] = await Promise.all([
+    fetch('/api/betting/summary').then(r=>r.json()),
+    fetch('/api/betting/equity').then(r=>r.json()),
+    fetch('/api/betting/open').then(r=>r.json()),
+    fetch('/api/betting/history').then(r=>r.json()),
+  ]);
+
+  const pnl = summary.total_pnl || 0;
+  document.getElementById('b-bankroll').textContent = fmt(summary.bankroll);
+  const pnlEl = document.getElementById('b-pnl');
+  pnlEl.textContent = signedFmt(pnl);
+  pnlEl.className = 'stat-value ' + colorClass(pnl);
+  const roiEl = document.getElementById('b-roi');
+  roiEl.textContent = (pnl >= 0 ? '+' : '') + summary.roi_pct + '%';
+  roiEl.className = 'stat-value ' + colorClass(pnl);
+  document.getElementById('b-record').textContent = `${summary.wins}-${summary.losses}`;
+  document.getElementById('b-open').textContent = summary.open_bets;
+
+  // Equity chart
+  if (equity.length > 1) {
+    bettingChart.data.labels   = equity.map(p => p.time);
+    bettingChart.data.datasets[0].data = equity.map(p => p.bankroll);
+    bettingChart.update();
+  }
+
+  // Open bets
+  const openEl = document.getElementById('open-bets-body');
+  if (open.length === 0) {
+    openEl.innerHTML = '<div class="empty">No open bets</div>';
+  } else {
+    openEl.innerHTML = `<table><thead><tr><th>Game</th><th>Type</th><th>Odds</th><th>Stake</th><th>To Win</th></tr></thead><tbody>` +
+      open.map(b => `
+        <tr>
+          <td>
+            ${b.away_team} @ ${b.home_team}<br>
+            <span class="reasoning">${(b.reasoning||'').slice(0,80)}…</span>
+          </td>
+          <td><span class="badge open">${b.bet_type}</span></td>
+          <td>${b.odds > 0 ? '+' : ''}${b.odds}</td>
+          <td>${fmt(b.stake)}</td>
+          <td class="green">${fmt(b.potential_payout - b.stake)}</td>
+        </tr>`).join('') +
+      '</tbody></table>';
+  }
+
+  // History
+  const histEl = document.getElementById('history-body');
+  if (history.length === 0) {
+    histEl.innerHTML = '<tr><td colspan="6" class="empty">No settled bets yet</td></tr>';
+  } else {
+    histEl.innerHTML = history.map(b => `
+      <tr>
+        <td>${b.away_team} @ ${b.home_team}</td>
+        <td>${b.bet_type}</td>
+        <td>${b.odds > 0 ? '+' : ''}${b.odds}</td>
+        <td>${fmt(b.stake)}</td>
+        <td class="${b.pnl >= 0 ? 'green' : 'red'}">${signedFmt(b.pnl)}</td>
+        <td><span class="badge ${b.status}">${b.status}</span></td>
+      </tr>`).join('');
+  }
+}
+
+async function fetchTrading() {
+  const [summary, equity] = await Promise.all([
+    fetch('/api/trading/summary').then(r=>r.json()),
+    fetch('/api/trading/equity').then(r=>r.json()),
+  ]);
+
+  const pnl = summary.pnl || 0;
+  document.getElementById('t-equity').textContent = fmt(summary.equity);
+  const tpnl = document.getElementById('t-pnl');
+  tpnl.textContent = signedFmt(pnl);
+  tpnl.className = 'stat-value ' + colorClass(pnl);
+  const tdd = document.getElementById('t-drawdown');
+  tdd.textContent = (summary.drawdown >= 0 ? '+' : '') + summary.drawdown + '%';
+  tdd.className = 'stat-value ' + colorClass(summary.drawdown);
+
+  const sig = summary.signal || 'HOLD';
+  const sigEl = document.getElementById('t-signal');
+  sigEl.textContent = sig;
+  sigEl.className = 'stat-value ' + (sig === 'BUY' ? 'green' : sig === 'SELL' ? 'red' : '');
+
+  document.getElementById('t-confidence').textContent = (summary.confidence || 0).toFixed(1) + '%';
+
+  const p = summary.proba || {sell:33, hold:34, buy:33};
+  document.getElementById('p-sell').textContent = `SELL ${p.sell}%`;
+  document.getElementById('p-hold').textContent = `HOLD ${p.hold}%`;
+  document.getElementById('p-buy').textContent  = `BUY ${p.buy}%`;
+  document.getElementById('pb-sell').style.width = p.sell + '%';
+  document.getElementById('pb-hold').style.width = p.hold + '%';
+  document.getElementById('pb-buy').style.width  = p.buy  + '%';
+
+  document.getElementById('t-mcc').textContent       = (summary.mcc || 0).toFixed(4);
+  document.getElementById('t-sharpe').textContent    = (summary.sharpe || 0).toFixed(4);
+  document.getElementById('t-threshold').textContent = ((summary.threshold || 0.65) * 100).toFixed(0) + '%';
+  document.getElementById('t-ntrain').textContent    = (summary.n_train || 0).toLocaleString() + ' bars';
+
+  if (equity.length > 1) {
+    tradingChart.data.labels = equity.map(p => p.time);
+    tradingChart.data.datasets[0].data = equity.map(p => p.equity);
+    tradingChart.update();
+  }
+}
+
+async function fetchLog() {
+  const endpoint = currentLog === 'betting' ? '/api/betting/log' : '/api/trading/log';
+  const lines = await fetch(endpoint).then(r => r.json());
+  renderLog(lines);
+}
+
+async function refresh() {
+  await Promise.all([fetchBetting(), fetchTrading(), fetchLog()]);
+  document.getElementById('updated').textContent =
+    'Updated ' + new Date().toLocaleTimeString();
+}
+
+// Init
+bettingChart = makeChart('bettingChart', 'Bankroll', '#60a5fa');
+tradingChart = makeChart('tradingChart', 'Equity',   '#22c55e');
+refresh();
+setInterval(refresh, 30000);  // refresh every 30 seconds
+</script>
+</body>
+</html>
