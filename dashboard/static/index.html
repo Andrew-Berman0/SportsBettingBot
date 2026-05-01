@@ -385,17 +385,26 @@ async function fetchTrading() {
 
   document.getElementById('t-confidence').textContent = (summary.confidence || 0).toFixed(1) + '%';
 
-  const p = summary.proba || {sell:33, hold:34, buy:33};
-  document.getElementById('p-sell').textContent = `SELL ${p.sell}%`;
-  document.getElementById('p-hold').textContent = `HOLD ${p.hold}%`;
-  document.getElementById('p-buy').textContent  = `BUY ${p.buy}%`;
-  document.getElementById('pb-sell').style.width = p.sell + '%';
-  document.getElementById('pb-hold').style.width = p.hold + '%';
-  document.getElementById('pb-buy').style.width  = p.buy  + '%';
+  const p = summary.proba;
+  if (p) {
+    document.getElementById('p-sell').textContent = `SELL ${p.sell.toFixed(1)}%`;
+    document.getElementById('p-hold').textContent = `HOLD ${p.hold.toFixed(1)}%`;
+    document.getElementById('p-buy').textContent  = `BUY ${p.buy.toFixed(1)}%`;
+    document.getElementById('pb-sell').style.width = p.sell + '%';
+    document.getElementById('pb-hold').style.width = p.hold + '%';
+    document.getElementById('pb-buy').style.width  = p.buy  + '%';
+  } else {
+    document.getElementById('p-sell').textContent = 'SELL –';
+    document.getElementById('p-hold').textContent = 'HOLD –';
+    document.getElementById('p-buy').textContent  = 'BUY –';
+    document.getElementById('pb-sell').style.width = '33%';
+    document.getElementById('pb-hold').style.width = '34%';
+    document.getElementById('pb-buy').style.width  = '33%';
+  }
 
   document.getElementById('t-mcc').textContent       = (summary.mcc || 0).toFixed(4);
   document.getElementById('t-sharpe').textContent    = (summary.sharpe || 0).toFixed(4);
-  document.getElementById('t-threshold').textContent = ((summary.threshold || 0.65) * 100).toFixed(0) + '%';
+  document.getElementById('t-threshold').textContent = (summary.threshold != null ? summary.threshold * 100 : 65).toFixed(0) + '%';
   document.getElementById('t-ntrain').textContent    = (summary.n_train || 0).toLocaleString() + ' bars';
 
   if (equity.length > 1) {

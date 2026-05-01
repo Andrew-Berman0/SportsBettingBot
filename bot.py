@@ -32,6 +32,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 from config import CONFIG
 from data.odds_fetcher import OddsFetcher
 from data.stats_fetcher import NBAStatsFetcher, ESPNStatsFetcher
+from data.injury_fetcher import InjuryFetcher
+from data.roster_fetcher import RosterFetcher
 from features.engineer import FeatureEngineer
 from models.claude_analyst import ClaudeAnalyst
 from broker.paper_broker import PaperBroker
@@ -66,7 +68,8 @@ def get_team_stats(sport: str, team_name: str, nba_fetcher: NBAStatsFetcher,
 
 
 def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
-                  espn_fetcher: ESPNStatsFetcher, nba_stats_df,
+                  espn_fetcher: ESPNStatsFetcher, injury_fetcher: InjuryFetcher,
+                  roster_fetcher: RosterFetcher, nba_stats_df,
                   engineer: FeatureEngineer, claude: ClaudeAnalyst,
                   broker: PaperBroker) -> None:
     """Run the full analysis pipeline for a single game and place bets if value found."""
@@ -99,12 +102,27 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     home_stats = get_team_stats(sport, home_team, nba_fetcher, espn_fetcher, nba_stats_df)
     away_stats = get_team_stats(sport, away_team, nba_fetcher, espn_fetcher, nba_stats_df)
 
+    # Injury report + current roster (NBA only — ESPN API)
+    home_injuries, away_injuries = [], []
+    home_roster, away_roster = "", ""
+    if sport == "basketball_nba":
+        home_injuries = injury_fetcher.get_team_injuries(home_team)
+        away_injuries = injury_fetcher.get_team_injuries(away_team)
+        home_roster   = roster_fetcher.get_roster_string(home_team)
+        away_roster   = roster_fetcher.get_roster_string(away_team)
+        if home_injuries or away_injuries:
+            logger.info(
+                f"  Injuries — {home_team}: {len(home_injuries)} | {away_team}: {len(away_injuries)}"
+            )
+
     # Base probability from implied odds (before Claude adjustment)
     base_home_prob = game.get("home_implied") or 0.5
 
     # Claude analysis
     logger.info(f"Analyzing: {away_team} @ {home_team} ({hours_until:.1f}h away)")
-    analysis = claude.analyze_game(game, home_stats, away_stats, base_home_prob)
+    analysis = claude.analyze_game(game, home_stats, away_stats, base_home_prob,
+                                   home_injuries=home_injuries, away_injuries=away_injuries,
+                                   home_roster=home_roster, away_roster=away_roster)
 
     our_home_prob = analysis["adjusted_home_prob"]
     our_away_prob = 1 - our_home_prob
@@ -152,10 +170,12 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
 
 
 def run_loop():
-    odds_fetcher  = OddsFetcher(api_key=CONFIG.odds_api_key)
-    nba_fetcher   = NBAStatsFetcher()
-    espn_fetcher  = ESPNStatsFetcher()
-    engineer      = FeatureEngineer()
+    odds_fetcher   = OddsFetcher(api_key=CONFIG.odds_api_key)
+    nba_fetcher    = NBAStatsFetcher()
+    espn_fetcher   = ESPNStatsFetcher()
+    injury_fetcher = InjuryFetcher()
+    roster_fetcher = RosterFetcher()
+    engineer       = FeatureEngineer()
     claude        = ClaudeAnalyst(api_key=CONFIG.claude.api_key, model=CONFIG.claude.model)
     broker        = PaperBroker(starting_bankroll=CONFIG.bankroll.starting_bankroll)
 
@@ -184,7 +204,7 @@ def run_loop():
                 for game_raw in games_raw:
                     evaluate_game(
                         game_raw, sport, nba_fetcher, espn_fetcher,
-                        nba_stats_df, engineer, claude, broker
+                        injury_fetcher, roster_fetcher, nba_stats_df, engineer, claude, broker
                     )
             else:
                 logger.info("No active sports right now — no bets to evaluate")
