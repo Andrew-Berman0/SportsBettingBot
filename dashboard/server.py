@@ -129,8 +129,17 @@ def trading_summary():
         confidence = None
         proba = None
 
+        starting_equity = None
         for line in reversed(lines):
-            if "Equity:" in line and equity is None:
+            if "Starting equity:" in line and starting_equity is None:
+                m = re.search(r"Starting equity: \$([\d,]+\.?\d*)", line)
+                if m:
+                    starting_equity = float(m.group(1).replace(",", ""))
+                    # If no Equity: line found yet, bot restarted recently — use this as current equity
+                    if equity is None:
+                        equity = starting_equity
+                        drawdown = 0.0
+            if "Equity:" in line and "Starting equity:" not in line and equity is None:
                 m = re.search(r"Equity: \$([\d,]+\.?\d*)\s+Drawdown: ([+\-\d.]+)%", line)
                 if m:
                     equity   = float(m.group(1).replace(",", ""))
@@ -144,21 +153,22 @@ def trading_summary():
                 m = re.search(r"SELL: ([\d.]+)%\s+HOLD: ([\d.]+)%\s+BUY: ([\d.]+)%", line)
                 if m:
                     proba = {"sell": float(m.group(1)), "hold": float(m.group(2)), "buy": float(m.group(3))}
-            if equity is not None and signal and proba:
+            if equity is not None and signal is not None:
                 break
 
         # Pull model metadata (MCC, Sharpe, threshold) from saved JSON
         meta = read_json(TRADING_META)
         state = read_json(TRADING_STATE)
 
+        effective_equity = equity if equity is not None else (starting_equity if starting_equity is not None else 100000)
         return {
-            "equity":      equity or 100000,
+            "equity":      effective_equity,
             "drawdown":    drawdown or 0,
             "signal":      signal or "HOLD",
             "confidence":  confidence or 0,
-            "proba":       proba or {"sell": 33, "hold": 34, "buy": 33},
+            "proba":       proba,   # None until bot logs a Probabilities line
             "starting":    100000,
-            "pnl":         round((equity or 100000) - 100000, 2),
+            "pnl":         round(effective_equity - 100000, 2),
             "mcc":         meta.get("mcc", 0),
             "sharpe":      meta.get("sharpe", 0),
             "threshold":   meta.get("optimal_threshold", 0.65),

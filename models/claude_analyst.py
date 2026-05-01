@@ -29,6 +29,10 @@ class ClaudeAnalyst:
         home_stats: dict,
         away_stats: dict,
         base_home_prob: float,
+        home_injuries: list | None = None,
+        away_injuries: list | None = None,
+        home_roster: str = "",
+        away_roster: str = "",
     ) -> dict:
         """
         Asks Claude to analyze the game and return an adjusted home win probability.
@@ -41,7 +45,9 @@ class ClaudeAnalyst:
                 "bet_recommendation": str,   # "home_ml" | "away_ml" | "over" | "under" | "pass"
             }
         """
-        prompt = self._build_prompt(game, home_stats, away_stats, base_home_prob)
+        prompt = self._build_prompt(game, home_stats, away_stats, base_home_prob,
+                                    home_injuries or [], away_injuries or [],
+                                    home_roster, away_roster)
 
         try:
             message = self.client.messages.create(
@@ -60,12 +66,22 @@ class ClaudeAnalyst:
                 "bet_recommendation":  "pass",
             }
 
-    def _build_prompt(self, game: dict, home_stats: dict, away_stats: dict, base_prob: float) -> str:
+    def _build_prompt(self, game: dict, home_stats: dict, away_stats: dict,
+                      base_prob: float, home_injuries: list, away_injuries: list,
+                      home_roster: str, away_roster: str) -> str:
         home = game["home_team"]
         away = game["away_team"]
 
         home_record = f"{home_stats.get('W', '?')}-{home_stats.get('L', '?')}"
         away_record = f"{away_stats.get('W', '?')}-{away_stats.get('L', '?')}"
+
+        def fmt_injuries(injuries: list) -> str:
+            if not injuries:
+                return "  None reported"
+            return "\n".join(
+                f"  - {i['player']}: {i['status']}" + (f" ({i['detail']})" if i.get('detail') else "")
+                for i in injuries
+            )
 
         return f"""You are an expert sports betting analyst. Analyze this upcoming game and provide a win probability estimate.
 
@@ -86,6 +102,9 @@ HOME TEAM ({home}):
 - Last 10 games: {home_stats.get('win_pct_l10', 'N/A'):.0%} win rate
 - Back-to-back: {'Yes' if home_stats.get('is_back_to_back') else 'No'}
 - Rest days: {home_stats.get('rest_days', 'N/A')}
+- Current roster: {home_roster or 'Not available'}
+- Injuries (Out/Doubtful/Questionable):
+{fmt_injuries(home_injuries)}
 
 AWAY TEAM ({away}):
 - Record: {away_record}
@@ -96,10 +115,13 @@ AWAY TEAM ({away}):
 - Last 10 games: {away_stats.get('win_pct_l10', 'N/A'):.0%} win rate
 - Back-to-back: {'Yes' if away_stats.get('is_back_to_back') else 'No'}
 - Rest days: {away_stats.get('rest_days', 'N/A')}
+- Current roster: {away_roster or 'Not available'}
+- Injuries (Out/Doubtful/Questionable):
+{fmt_injuries(away_injuries)}
 
 STATISTICAL MODEL ESTIMATE: {home} win probability = {base_prob:.1%}
 
-Based on this data, provide your analysis. Consider: home court advantage, rest/fatigue, recent momentum, matchup style, and any other relevant factors you know about these teams.
+Based on this data, provide your analysis. Consider: home court advantage, rest/fatigue, recent momentum, injury impact, matchup style, and any other relevant factors you know about these teams.
 
 Respond ONLY with valid JSON in this exact format:
 {{
