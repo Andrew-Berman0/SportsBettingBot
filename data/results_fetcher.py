@@ -78,12 +78,14 @@ class ResultsFetcher:
         if not completed:
             return 0
 
+        now = datetime.now(timezone.utc)
         settled_count = 0
         for result in completed:
             matching_bets = [
                 b for b in broker.open_bets
                 if self._teams_match(b["home_team"], result["home_team"])
                 and self._teams_match(b["away_team"], result["away_team"])
+                and self._game_has_started(b.get("commence_time"), now)
             ]
             if not matching_bets:
                 continue
@@ -108,3 +110,14 @@ class ResultsFetcher:
         b = bet_name.lower().split()[-1]
         e = espn_name.lower().split()[-1]
         return b == e
+
+    @staticmethod
+    def _game_has_started(commence_time: str | None, now: datetime) -> bool:
+        """Returns True if commence_time is in the past (game has started or finished)."""
+        if not commence_time:
+            return True  # no timestamp stored — assume it's a legacy bet, allow settlement
+        try:
+            start = datetime.fromisoformat(commence_time.replace("Z", "+00:00"))
+            return start <= now
+        except Exception:
+            return True

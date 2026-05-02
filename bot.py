@@ -88,8 +88,8 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     except Exception:
         return
 
-    # Skip if already bet on this game
-    existing_ids = {b["game_id"] for b in broker.open_bets}
+    # Skip if already bet on this game (open or already settled)
+    existing_ids = {b["game_id"] for b in broker.open_bets} | {b["game_id"] for b in broker.closed_bets}
     if game["game_id"] in existing_ids:
         return
 
@@ -169,6 +169,7 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
                 claude_home_prob=our_home_prob,
                 book_home_prob=book_home_prob,
                 features=features,
+                commence_time=game.get("commence_time"),
             )
 
     elif away_edge >= min_edge and game.get("away_ml") is not None:
@@ -184,6 +185,7 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
                 claude_home_prob=our_home_prob,
                 book_home_prob=book_home_prob,
                 features=features,
+                commence_time=game.get("commence_time"),
             )
     else:
         logger.info(f"  No value found — passing on {away_team} @ {home_team}")
