@@ -89,21 +89,22 @@ class NBAStatsFetcher:
                 return {}
 
             df = df.sort_values("GAME_DATE", ascending=False).head(n_games)
-            wins    = (df["WL"] == "W").sum()
-            avg_diff = df["PLUS_MINUS"].mean()
+            wins_l10  = (df["WL"] == "W").sum()
+            wins_l5   = (df.head(5)["WL"] == "W").sum()
+            diff_l10  = df["PLUS_MINUS"].mean()
+            diff_l5   = df.head(5)["PLUS_MINUS"].mean()
 
-            # Back-to-back: last game was yesterday
             last_game_date = pd.to_datetime(df["GAME_DATE"].iloc[0])
-            is_b2b = (datetime.today() - last_game_date).days <= 1
-
-            # Rest days since last game
+            is_b2b    = (datetime.today() - last_game_date).days <= 1
             rest_days = (datetime.today() - last_game_date).days
 
             return {
-                f"win_pct_l{n_games}":    wins / n_games,
-                f"avg_diff_l{n_games}":   float(avg_diff),
-                "is_back_to_back":         int(is_b2b),
-                "rest_days":               rest_days,
+                "win_pct_l10":     wins_l10 / max(len(df), 1),
+                "win_pct_l5":      wins_l5  / max(min(5, len(df)), 1),
+                "avg_diff_l10":    float(diff_l10),
+                "avg_diff_l5":     float(diff_l5),
+                "is_back_to_back": int(is_b2b),
+                "rest_days":       rest_days,
             }
         except Exception as e:
             logger.warning(f"Recent form fetch error (team {team_id}): {e}")
