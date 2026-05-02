@@ -34,8 +34,10 @@ from data.odds_fetcher import OddsFetcher
 from data.stats_fetcher import NBAStatsFetcher, ESPNStatsFetcher
 from data.injury_fetcher import InjuryFetcher
 from data.roster_fetcher import RosterFetcher
+from data.results_fetcher import ResultsFetcher
 from features.engineer import FeatureEngineer
 from models.claude_analyst import ClaudeAnalyst
+from models.lgbm_predictor import LGBMPredictor
 from broker.paper_broker import PaperBroker
 
 logging.basicConfig(
@@ -71,7 +73,7 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
                   espn_fetcher: ESPNStatsFetcher, injury_fetcher: InjuryFetcher,
                   roster_fetcher: RosterFetcher, nba_stats_df,
                   engineer: FeatureEngineer, claude: ClaudeAnalyst,
-                  broker: PaperBroker) -> None:
+                  broker: PaperBroker, lgbm: LGBMPredictor | None = None) -> None:
     """Run the full analysis pipeline for a single game and place bets if value found."""
     game = OddsFetcher.parse_game(game_raw)
     if not game:
@@ -115,10 +117,24 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
                 f"  Injuries — {home_team}: {len(home_injuries)} | {away_team}: {len(away_injuries)}"
             )
 
-    # Base probability from implied odds (before Claude adjustment)
-    base_home_prob = game.get("home_implied") or 0.5
+    # Build feature snapshot (saved with bet for future model training)
+    features = engineer.build_game_features(game, home_stats, away_stats)
 
-    # Claude analysis
+    # Base probability: LightGBM model if available, else market implied
+    book_home_prob = game.get("home_implied") or 0.5
+    book_away_prob = game.get("away_implied") or 0.5
+
+    if lgbm and sport == "basketball_nba":
+        lgbm_prob = lgbm.predict(
+            home_team, away_team, home_stats, away_stats,
+            book_home_prob, book_away_prob,
+        )
+        logger.info(f"  LightGBM: home={lgbm_prob:.1%}  |  Market: home={book_home_prob:.1%}")
+        base_home_prob = lgbm_prob
+    else:
+        base_home_prob = book_home_prob
+
+    # Claude analysis — receives model probability as starting point
     logger.info(f"Analyzing: {away_team} @ {home_team} ({hours_until:.1f}h away)")
     analysis = claude.analyze_game(game, home_stats, away_stats, base_home_prob,
                                    home_injuries=home_injuries, away_injuries=away_injuries,
@@ -126,8 +142,6 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
 
     our_home_prob = analysis["adjusted_home_prob"]
     our_away_prob = 1 - our_home_prob
-    book_home_prob = game.get("home_implied") or 0.5
-    book_away_prob = game.get("away_implied") or 0.5
 
     home_edge = our_home_prob - book_home_prob
     away_edge = our_away_prob - book_away_prob
@@ -152,6 +166,9 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
                 home_team=home_team, away_team=away_team,
                 bet_type="home_ml", odds=game["home_ml"], stake=stake,
                 reasoning=analysis["reasoning"],
+                claude_home_prob=our_home_prob,
+                book_home_prob=book_home_prob,
+                features=features,
             )
 
     elif away_edge >= min_edge and game.get("away_ml") is not None:
@@ -164,20 +181,25 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
                 home_team=home_team, away_team=away_team,
                 bet_type="away_ml", odds=game["away_ml"], stake=stake,
                 reasoning=analysis["reasoning"],
+                claude_home_prob=our_home_prob,
+                book_home_prob=book_home_prob,
+                features=features,
             )
     else:
         logger.info(f"  No value found — passing on {away_team} @ {home_team}")
 
 
 def run_loop():
-    odds_fetcher   = OddsFetcher(api_key=CONFIG.odds_api_key)
-    nba_fetcher    = NBAStatsFetcher()
-    espn_fetcher   = ESPNStatsFetcher()
-    injury_fetcher = InjuryFetcher()
-    roster_fetcher = RosterFetcher()
-    engineer       = FeatureEngineer()
-    claude        = ClaudeAnalyst(api_key=CONFIG.claude.api_key, model=CONFIG.claude.model)
-    broker        = PaperBroker(starting_bankroll=CONFIG.bankroll.starting_bankroll)
+    odds_fetcher    = OddsFetcher(api_key=CONFIG.odds_api_key)
+    nba_fetcher     = NBAStatsFetcher()
+    espn_fetcher    = ESPNStatsFetcher()
+    injury_fetcher  = InjuryFetcher()
+    roster_fetcher  = RosterFetcher()
+    results_fetcher = ResultsFetcher()
+    engineer        = FeatureEngineer()
+    claude          = ClaudeAnalyst(api_key=CONFIG.claude.api_key, model=CONFIG.claude.model)
+    broker          = PaperBroker(starting_bankroll=CONFIG.bankroll.starting_bankroll)
+    lgbm            = LGBMPredictor.load()  # None if model not yet trained
 
     logger.info("=" * 60)
     logger.info("Sports Betting Bot started [PAPER MODE]")
@@ -189,6 +211,13 @@ def run_loop():
         try:
             now = datetime.now(timezone.utc)
             logger.info(f"--- Loop tick: {now.strftime('%Y-%m-%d %H:%M UTC')} ---")
+
+            # Settle any completed games first
+            if broker.open_bets:
+                n_settled = results_fetcher.settle_open_bets(broker)
+                if n_settled:
+                    logger.info(f"Auto-settled {n_settled} bet(s) from completed games.")
+                    broker.export_training_data("training_data.csv")
 
             # Find active sport with upcoming games
             sport, games_raw = odds_fetcher.get_active_sport(
@@ -204,7 +233,8 @@ def run_loop():
                 for game_raw in games_raw:
                     evaluate_game(
                         game_raw, sport, nba_fetcher, espn_fetcher,
-                        injury_fetcher, roster_fetcher, nba_stats_df, engineer, claude, broker
+                        injury_fetcher, roster_fetcher, nba_stats_df,
+                        engineer, claude, broker, lgbm,
                     )
             else:
                 logger.info("No active sports right now — no bets to evaluate")

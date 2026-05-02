@@ -31,14 +31,17 @@ class PaperBroker:
 
     def place_bet(
         self,
-        game_id:     str,
-        sport:       str,
-        home_team:   str,
-        away_team:   str,
-        bet_type:    str,    # "home_ml" | "away_ml" | "over" | "under"
-        odds:        float,  # American odds
-        stake:       float,  # USD amount to bet
-        reasoning:   str = "",
+        game_id:         str,
+        sport:           str,
+        home_team:       str,
+        away_team:       str,
+        bet_type:        str,    # "home_ml" | "away_ml" | "over" | "under"
+        odds:            float,  # American odds
+        stake:           float,  # USD amount to bet
+        reasoning:       str = "",
+        claude_home_prob: float | None = None,   # our estimated home win prob
+        book_home_prob:   float | None = None,   # bookmaker's implied home prob
+        features:         dict | None = None,    # feature snapshot for model training
     ) -> dict:
         """Place a paper bet. Returns the bet record."""
         if stake > self.bankroll:
@@ -58,6 +61,9 @@ class PaperBroker:
             "placed_at":   datetime.now(timezone.utc).isoformat(),
             "status":      "open",
             "reasoning":   reasoning,
+            "claude_home_prob": claude_home_prob,
+            "book_home_prob":   book_home_prob,
+            "features":        features or {},
         }
         self.bankroll -= stake
         self.open_bets.append(bet)
@@ -83,6 +89,7 @@ class PaperBroker:
             bet["settled_at"] = datetime.now(timezone.utc).isoformat()
             bet["home_score"] = home_score
             bet["away_score"] = away_score
+            bet["home_won"]   = home_score > away_score   # training label
             if won:
                 self.bankroll += bet["potential_payout"]
                 bet["pnl"] = bet["potential_payout"] - bet["stake"]
@@ -140,6 +147,34 @@ class PaperBroker:
             "wins":           wins,
             "losses":         total_closed - wins,
         }
+
+    def export_training_data(self, path: str = "training_data.csv") -> int:
+        """
+        Exports closed bets with features + outcome to a CSV for model training.
+        Each row = one bet with full feature snapshot and home_won label.
+        Returns number of rows written.
+        """
+        import csv
+        rows = [b for b in self.closed_bets if b.get("features") and "home_won" in b]
+        if not rows:
+            logger.info("No closed bets with features yet — nothing to export.")
+            return 0
+
+        # Collect all feature keys across all rows
+        feature_keys = sorted({k for b in rows for k in b["features"].keys()})
+        meta_keys = ["game_id", "sport", "home_team", "away_team", "bet_type",
+                     "odds", "placed_at", "claude_home_prob", "book_home_prob", "home_won"]
+
+        with open(path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=meta_keys + feature_keys, extrasaction="ignore")
+            writer.writeheader()
+            for b in rows:
+                row = {k: b.get(k, "") for k in meta_keys}
+                row.update({k: b["features"].get(k, "") for k in feature_keys})
+                writer.writerow(row)
+
+        logger.info(f"Exported {len(rows)} training rows → {path}")
+        return len(rows)
 
     # ------------------------------------------------------------------
     # Private
