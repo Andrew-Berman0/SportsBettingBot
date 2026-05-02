@@ -42,6 +42,7 @@ class PaperBroker:
         claude_home_prob: float | None = None,   # our estimated home win prob
         book_home_prob:   float | None = None,   # bookmaker's implied home prob
         features:         dict | None = None,    # feature snapshot for model training
+        commence_time:    str | None = None,     # ISO-8601 game start time
     ) -> dict:
         """Place a paper bet. Returns the bet record."""
         if stake > self.bankroll:
@@ -59,6 +60,7 @@ class PaperBroker:
             "stake":       stake,
             "potential_payout": self._calc_payout(stake, odds),
             "placed_at":   datetime.now(timezone.utc).isoformat(),
+            "commence_time": commence_time,
             "status":      "open",
             "reasoning":   reasoning,
             "claude_home_prob": claude_home_prob,
