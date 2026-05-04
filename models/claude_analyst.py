@@ -11,6 +11,7 @@ This runs AFTER the statistical model to overlay qualitative judgment.
 
 import json
 import logging
+import re
 
 import anthropic
 
@@ -132,23 +133,49 @@ Respond ONLY with valid JSON in this exact format:
 }}"""
 
     def _parse_response(self, raw: str, fallback_prob: float) -> dict:
+        # First attempt: standard JSON parse
         try:
             start = raw.find("{")
             end   = raw.rfind("}") + 1
             data  = json.loads(raw[start:end])
             prob  = float(data.get("adjusted_home_prob", fallback_prob))
-            prob  = max(0.05, min(0.95, prob))   # clamp to [5%, 95%]
-            return {
-                "adjusted_home_prob":  prob,
-                "confidence":          data.get("confidence", "low"),
-                "reasoning":           data.get("reasoning", ""),
-                "bet_recommendation":  data.get("bet_recommendation", "pass"),
+            return self._build_result(prob, data, fallback_prob)
+        except Exception:
+            pass
+
+        # Second attempt: regex extraction — handles stray quotes / minor malformed JSON
+        try:
+            prob_match = re.search(r'"adjusted_home_prob"\s*:\s*([0-9.]+)', raw)
+            conf_match = re.search(r'"confidence"\s*:\s*"(low|medium|high)"', raw)
+            rec_match  = re.search(r'"bet_recommendation"\s*:\s*"([^"]+)"', raw)
+            # Reasoning: grab everything between the first " after the key and the last "
+            # before the next key or closing brace — tolerates embedded stray quotes
+            reason_match = re.search(r'"reasoning"\s*:\s*"(.*?)"(?:\s*,\s*"|\s*\})', raw, re.DOTALL)
+
+            prob = float(prob_match.group(1)) if prob_match else fallback_prob
+            data = {
+                "adjusted_home_prob": prob,
+                "confidence":         conf_match.group(1) if conf_match else "low",
+                "reasoning":          reason_match.group(1).strip() if reason_match else "",
+                "bet_recommendation": rec_match.group(1)  if rec_match  else "pass",
             }
+            logger.warning(f"Used regex fallback to parse Claude response")
+            return self._build_result(prob, data, fallback_prob)
         except Exception as e:
             logger.warning(f"Failed to parse Claude response: {e}\nRaw: {raw}")
             return {
                 "adjusted_home_prob":  fallback_prob,
                 "confidence":          "low",
-                "reasoning":           "Parse error",
+                "reasoning":           "Parse error — using model probability",
                 "bet_recommendation":  "pass",
             }
+
+    @staticmethod
+    def _build_result(prob: float, data: dict, fallback_prob: float) -> dict:
+        prob = max(0.05, min(0.95, float(prob)))
+        return {
+            "adjusted_home_prob":  prob,
+            "confidence":          data.get("confidence", "low"),
+            "reasoning":           data.get("reasoning", ""),
+            "bet_recommendation":  data.get("bet_recommendation", "pass"),
+        }
