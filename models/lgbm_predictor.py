@@ -12,9 +12,12 @@ Usage:
 
 import logging
 import pickle
+import warnings
 from pathlib import Path
 
 import numpy as np
+
+warnings.filterwarnings("ignore", message="X does not have valid feature names")
 
 logger = logging.getLogger(__name__)
 
