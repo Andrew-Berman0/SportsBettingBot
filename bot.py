@@ -153,10 +153,11 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     )
     logger.info(f"  Reasoning: {analysis['reasoning']}")
 
-    # --- Place bets where edge exceeds threshold ---
-    min_edge = CONFIG.bankroll.min_edge
+    # --- Place bets where edge exceeds threshold AND Claude agrees ---
+    min_edge   = CONFIG.bankroll.min_edge
+    claude_rec = analysis["bet_recommendation"]  # "home_ml" | "away_ml" | "over" | "under" | "pass"
 
-    if home_edge >= min_edge and game.get("home_ml") is not None:
+    if home_edge >= min_edge and claude_rec == "home_ml" and game.get("home_ml") is not None:
         stake = broker.kelly_stake(our_home_prob, game["home_ml"], CONFIG.bankroll.kelly_fraction)
         max_stake = broker.bankroll * CONFIG.bankroll.max_bet_pct
         stake = min(stake, max_stake)
@@ -172,7 +173,7 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
                 commence_time=game.get("commence_time"),
             )
 
-    elif away_edge >= min_edge and game.get("away_ml") is not None:
+    elif away_edge >= min_edge and claude_rec == "away_ml" and game.get("away_ml") is not None:
         stake = broker.kelly_stake(our_away_prob, game["away_ml"], CONFIG.bankroll.kelly_fraction)
         max_stake = broker.bankroll * CONFIG.bankroll.max_bet_pct
         stake = min(stake, max_stake)
@@ -187,6 +188,8 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
                 features=features,
                 commence_time=game.get("commence_time"),
             )
+    elif claude_rec == "pass" and (home_edge >= min_edge or away_edge >= min_edge):
+        logger.info(f"  Edge found but Claude says pass — skipping {away_team} @ {home_team}")
     else:
         logger.info(f"  No value found — passing on {away_team} @ {home_team}")
 
