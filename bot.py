@@ -157,8 +157,13 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     min_edge   = CONFIG.bankroll.min_edge
     claude_rec = analysis["bet_recommendation"]  # "home_ml" | "away_ml" | "over" | "under" | "pass"
 
+    # Scale Kelly fraction by confidence: high=1.0x, medium=0.5x, low=0.25x
+    _conf_multiplier = {"high": 1.0, "medium": 0.5, "low": 0.25}.get(analysis["confidence"], 0.5)
+    kelly = CONFIG.bankroll.kelly_fraction * _conf_multiplier
+    logger.info(f"  Confidence={analysis['confidence']} → Kelly multiplier={_conf_multiplier:.2f}x (effective Kelly={kelly:.3f})")
+
     if home_edge >= min_edge and claude_rec == "home_ml" and game.get("home_ml") is not None:
-        stake = broker.kelly_stake(our_home_prob, game["home_ml"], CONFIG.bankroll.kelly_fraction)
+        stake = broker.kelly_stake(our_home_prob, game["home_ml"], kelly)
         max_stake = broker.bankroll * CONFIG.bankroll.max_bet_pct
         stake = min(stake, max_stake)
         if stake >= 5.0:
@@ -174,7 +179,7 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
             )
 
     elif away_edge >= min_edge and claude_rec == "away_ml" and game.get("away_ml") is not None:
-        stake = broker.kelly_stake(our_away_prob, game["away_ml"], CONFIG.bankroll.kelly_fraction)
+        stake = broker.kelly_stake(our_away_prob, game["away_ml"], kelly)
         max_stake = broker.bankroll * CONFIG.bankroll.max_bet_pct
         stake = min(stake, max_stake)
         if stake >= 5.0:

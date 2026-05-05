@@ -52,19 +52,32 @@ def fetch_game_logs(seasons: list[str]) -> pd.DataFrame:
 
     frames = []
     for season in seasons:
-        cache = CACHE_DIR / f"gamelog_{season}.parquet"
-        if cache.exists():
-            logger.info(f"  [{season}] loaded from cache")
-            frames.append(pd.read_parquet(cache))
-            continue
+        season_frames = []
+        for game_type, label, is_po in [
+            ("Regular Season", "regular", 0),
+            ("Playoffs",        "playoff", 1),
+        ]:
+            cache = CACHE_DIR / f"gamelog_{season}_{label}.parquet"
+            if cache.exists():
+                logger.info(f"  [{season}] {label} loaded from cache")
+                df = pd.read_parquet(cache)
+            else:
+                logger.info(f"  [{season}] fetching {label} from nba_api...")
+                time.sleep(0.8)
+                df = LeagueGameLog(
+                    season=season,
+                    season_type_all_star=game_type,
+                    direction="ASC",
+                ).get_data_frames()[0]
+                df["season"] = season
+                df.to_parquet(cache)
+                logger.info(f"    → {len(df):,} {label} team-game rows")
+            df["is_playoff"] = is_po
+            season_frames.append(df)
 
-        logger.info(f"  [{season}] fetching from nba_api...")
-        time.sleep(0.8)
-        df = LeagueGameLog(season=season, direction="ASC").get_data_frames()[0]
-        df["season"] = season
-        df.to_parquet(cache)
-        logger.info(f"    → {len(df):,} team-game rows")
-        frames.append(df)
+        combined = pd.concat(season_frames, ignore_index=True)
+        combined = combined.sort_values("GAME_DATE").reset_index(drop=True)
+        frames.append(combined)
 
     return pd.concat(frames, ignore_index=True)
 
@@ -136,7 +149,7 @@ def pivot_to_games(logs: pd.DataFrame) -> pd.DataFrame:
     home = home.rename(columns=h_rename)
     away = away.rename(columns=a_rename)
 
-    h_keep = ["GAME_ID", "GAME_DATE", "season"] + list(h_rename.values())
+    h_keep = ["GAME_ID", "GAME_DATE", "season", "is_playoff"] + list(h_rename.values())
     a_keep = ["GAME_ID"] + list(a_rename.values())
 
     games = home[[c for c in h_keep if c in home.columns]].merge(
