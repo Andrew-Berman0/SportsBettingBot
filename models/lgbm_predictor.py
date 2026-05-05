@@ -13,6 +13,7 @@ Usage:
 import logging
 import pickle
 import warnings
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -95,6 +96,8 @@ class LGBMPredictor:
                 # Market prior
                 "home_implied_prob":  home_implied_prob,
                 "away_implied_prob":  away_implied_prob,
+                # Game context — NBA playoffs run mid-April through mid-June
+                "is_playoff":         int(datetime.today().month in (4, 5, 6)),
             }
 
             X = np.array([[feat.get(c, 0.0) for c in self.feature_cols]])

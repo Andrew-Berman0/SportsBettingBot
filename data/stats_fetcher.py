@@ -12,6 +12,17 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+
+def current_nba_season() -> str:
+    """Returns the current NBA season string, e.g. '2025-26'.
+    NBA seasons start in October, so Oct–Dec belong to the new season year."""
+    now = datetime.today()
+    year = now.year
+    if now.month >= 10:
+        return f"{year}-{str(year + 1)[2:]}"
+    else:
+        return f"{year - 1}-{str(year)[2:]}"
+
 import pandas as pd
 import requests
 
@@ -40,7 +51,8 @@ class NBAStatsFetcher:
             logger.warning("nba_api not installed — run: pip install nba_api")
             self._available = False
 
-    def get_team_stats(self, season: str = "2024-25") -> pd.DataFrame:
+    def get_team_stats(self, season: str | None = None) -> pd.DataFrame:
+        season = season or current_nba_season()
         """
         Returns a DataFrame of team stats for the season.
         Columns include: TEAM_ID, TEAM_NAME, W_PCT, OFF_RATING, DEF_RATING,
@@ -70,7 +82,8 @@ class NBAStatsFetcher:
             logger.error(f"NBA team stats fetch error: {e}")
             return pd.DataFrame()
 
-    def get_recent_form(self, team_id: int, n_games: int = 10, season: str = "2024-25") -> dict:
+    def get_recent_form(self, team_id: int, n_games: int = 10, season: str | None = None) -> dict:
+        season = season or current_nba_season()
         """
         Returns recent form stats for a team: win%, avg point diff, back-to-back flag.
         """

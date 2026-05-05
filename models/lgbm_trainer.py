@@ -50,6 +50,8 @@ FEATURE_COLS = [
     "home_is_b2b",         "away_is_b2b",
     # Market closing line (strong prior)
     "home_implied_prob",   "away_implied_prob",
+    # Game context
+    "is_playoff",
 ]
 TARGET        = "home_won"
 TRAIN_SEASONS = ["2021-22", "2022-23"]
