@@ -29,16 +29,16 @@ load_dotenv()
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config import CONFIG
-from data.odds_fetcher import OddsFetcher
-from data.stats_fetcher import NBAStatsFetcher, ESPNStatsFetcher
-from data.injury_fetcher import InjuryFetcher
-from data.roster_fetcher import RosterFetcher
-from data.results_fetcher import ResultsFetcher
-from features.engineer import FeatureEngineer
-from models.claude_analyst import ClaudeAnalyst
-from models.lgbm_predictor import LGBMPredictor
-from broker.paper_broker import PaperBroker
+from SportsBettingBot.config import CONFIG
+from SportsBettingBot.data.odds_fetcher import OddsFetcher
+from SportsBettingBot.data.stats_fetcher import NBAStatsFetcher, ESPNStatsFetcher
+from SportsBettingBot.data.injury_fetcher import InjuryFetcher
+from SportsBettingBot.data.roster_fetcher import RosterFetcher
+from SportsBettingBot.data.results_fetcher import ResultsFetcher
+from SportsBettingBot.features.engineer import FeatureEngineer
+from SportsBettingBot.models.claude_analyst import ClaudeAnalyst
+from SportsBettingBot.models.lgbm_predictor import LGBMPredictor
+from SportsBettingBot.broker.paper_broker import PaperBroker
 
 logging.basicConfig(
     level=logging.INFO,
