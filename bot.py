@@ -27,7 +27,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv()
 
-sys.path.insert(0, str(Path(__file__).parent))
+# Works whether bot.py lives above or inside the SportsBettingBot package directory
+_here = Path(__file__).parent
+sys.path.insert(0, str(_here if (_here / "SportsBettingBot").is_dir() else _here.parent))
 
 from SportsBettingBot.config import CONFIG
 from SportsBettingBot.data.odds_fetcher import OddsFetcher
@@ -75,22 +77,22 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
                   engineer: FeatureEngineer, claude: ClaudeAnalyst,
                   broker: PaperBroker, lgbm: LGBMPredictor | None = None) -> None:
     """Run the full analysis pipeline for a single game and place bets if value found."""
-    game = OddsFetcher.parse_game(game_raw)
+    game = game_raw if game_raw.get("_pre_parsed") else OddsFetcher.parse_game(game_raw)
     if not game:
         return
 
-    # Skip games starting in less than 1 hour (too late to bet reliably)
+    # Only evaluate in the final 1–3 hours — injury reports and odds are sharpest then
     try:
         commence = datetime.fromisoformat(game["commence_time"].replace("Z", "+00:00"))
         hours_until = (commence - datetime.now(timezone.utc)).total_seconds() / 3600
-        if hours_until < 1 or hours_until > 48:
+        if hours_until < 1 or hours_until > 3:
             return
     except Exception:
         return
 
-    # Skip if already bet on or evaluated (pass decision) for this game
+    # Skip if already bet on this game
     existing_ids = {b["game_id"] for b in broker.open_bets} | {b["game_id"] for b in broker.closed_bets}
-    if game["game_id"] in existing_ids or game["game_id"] in broker.evaluated_game_ids:
+    if game["game_id"] in existing_ids:
         return
 
     # Skip if too many open bets
@@ -108,8 +110,9 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     home_injuries, away_injuries = [], []
     home_roster, away_roster = "", ""
     if sport == "basketball_nba":
-        home_injuries = injury_fetcher.get_team_injuries(home_team)
-        away_injuries = injury_fetcher.get_team_injuries(away_team)
+        injury_ttl = 30 if hours_until < 6 else 120
+        home_injuries = injury_fetcher.get_team_injuries(home_team, max_age_minutes=injury_ttl)
+        away_injuries = injury_fetcher.get_team_injuries(away_team, max_age_minutes=injury_ttl)
         home_roster   = roster_fetcher.get_roster_string(home_team)
         away_roster   = roster_fetcher.get_roster_string(away_team)
         if home_injuries or away_injuries:
@@ -195,10 +198,8 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
             )
     elif claude_rec == "pass" and (home_edge >= min_edge or away_edge >= min_edge):
         logger.info(f"  Edge found but Claude says pass — skipping {away_team} @ {home_team}")
-        broker.mark_evaluated(game["game_id"])
     else:
         logger.info(f"  No value found — passing on {away_team} @ {home_team}")
-        broker.mark_evaluated(game["game_id"])
 
 
 def run_loop():

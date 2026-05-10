@@ -17,6 +17,17 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+# Imported lazily to avoid circular imports
+_action_network_fetcher = None
+
+
+def _get_action_network():
+    global _action_network_fetcher
+    if _action_network_fetcher is None:
+        from SportsBettingBot.data.action_network_fetcher import ActionNetworkFetcher
+        _action_network_fetcher = ActionNetworkFetcher()
+    return _action_network_fetcher
+
 CACHE_DIR = Path(__file__).parent.parent / "data" / "raw"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -36,10 +47,10 @@ class OddsFetcher:
         """
         cache_file = CACHE_DIR / f"odds_{sport}.json"
 
-        # Use cache if less than 30 minutes old
+        # Use cache if less than 60 minutes old (matches loop interval — 1 API call per tick)
         if cache_file.exists():
             age_minutes = (time.time() - cache_file.stat().st_mtime) / 60
-            if age_minutes < 30:
+            if age_minutes < 60:
                 logger.info(f"Odds cache fresh ({age_minutes:.0f}min old) — {sport}")
                 with open(cache_file) as f:
                     return json.load(f)
@@ -59,6 +70,12 @@ class OddsFetcher:
 
         try:
             resp = self.session.get(url, params=params, timeout=10)
+            if resp.status_code in (401, 422, 429):
+                logger.warning(
+                    f"Odds API quota/auth error ({resp.status_code}) — "
+                    f"falling back to ActionNetwork for {sport}"
+                )
+                return _get_action_network().get_upcoming_games(sport)
             resp.raise_for_status()
             games = resp.json()
             remaining = resp.headers.get("x-requests-remaining", "?")
@@ -67,8 +84,8 @@ class OddsFetcher:
                 json.dump(games, f)
             return games
         except Exception as e:
-            logger.error(f"Odds API error for {sport}: {e}")
-            return []
+            logger.error(f"Odds API error for {sport}: {e} — falling back to ActionNetwork")
+            return _get_action_network().get_upcoming_games(sport)
 
     def get_active_sport(self, sports: list[str], bookmakers: list[str]) -> tuple[str | None, list[dict]]:
         """

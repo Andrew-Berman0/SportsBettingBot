@@ -27,15 +27,20 @@ class InjuryFetcher:
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "Mozilla/5.0"})
-        self._cache: dict[str, list] = {}   # team displayName → injuries list
+        self._cache: dict[str, list] = {}
+        self._loaded_at: float = 0.0
 
-    def get_team_injuries(self, team_name: str) -> list[dict]:
+    def get_team_injuries(self, team_name: str, max_age_minutes: int = 120) -> list[dict]:
         """
         Returns significant injuries for a team.
         Each entry: {"player": str, "status": str, "detail": str}
         Returns [] if team has no injuries (not an error).
+
+        max_age_minutes: force-refresh if in-memory cache is older than this.
+        Pass 30 for games within 6 hours to catch late scratches.
         """
-        if not self._cache:
+        age_minutes = (time.time() - self._loaded_at) / 60
+        if not self._cache or age_minutes > max_age_minutes:
             self._load()
 
         name_lower = team_name.lower()
@@ -55,15 +60,9 @@ class InjuryFetcher:
         return []
 
     def _load(self):
-        """Load from cache if fresh, otherwise fetch from ESPN."""
-        if CACHE_FILE.exists():
-            age_hours = (time.time() - CACHE_FILE.stat().st_mtime) / 3600
-            if age_hours < 2:
-                with open(CACHE_FILE) as f:
-                    self._cache = json.load(f)
-                logger.info(f"Loaded injury cache ({len(self._cache)} teams)")
-                return
+        """Fetch from ESPN and update both file cache and in-memory cache."""
         self._fetch()
+        self._loaded_at = time.time()
 
     def _fetch(self):
         try:
