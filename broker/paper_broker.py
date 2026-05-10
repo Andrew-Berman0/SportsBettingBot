@@ -23,6 +23,7 @@ class PaperBroker:
         self.bankroll   = starting_bankroll
         self.open_bets  = []   # list of bet dicts
         self.closed_bets = []  # settled bets
+        self.evaluated_game_ids: set[str] = set()  # games already analyzed — skip re-evaluation
         self._load()
 
     # ------------------------------------------------------------------
@@ -108,6 +109,11 @@ class PaperBroker:
         self.closed_bets.extend(settled)
         self._save()
         return settled
+
+    def mark_evaluated(self, game_id: str) -> None:
+        """Record that we've already made a pass decision on this game."""
+        self.evaluated_game_ids.add(game_id)
+        self._save()
 
     def kelly_stake(self, our_prob: float, odds: float, fraction: float = 0.25) -> float:
         """
@@ -210,9 +216,10 @@ class PaperBroker:
 
     def _save(self):
         state = {
-            "bankroll":    self.bankroll,
-            "open_bets":   self.open_bets,
-            "closed_bets": self.closed_bets,
+            "bankroll":            self.bankroll,
+            "open_bets":           self.open_bets,
+            "closed_bets":         self.closed_bets,
+            "evaluated_game_ids":  list(self.evaluated_game_ids),
         }
         with open(STATE_FILE, "w") as f:
             json.dump(state, f, indent=2)
@@ -221,9 +228,10 @@ class PaperBroker:
         if STATE_FILE.exists():
             with open(STATE_FILE) as f:
                 state = json.load(f)
-            self.bankroll    = state.get("bankroll", self.starting_bankroll)
-            self.open_bets   = state.get("open_bets", [])
-            self.closed_bets = state.get("closed_bets", [])
+            self.bankroll           = state.get("bankroll", self.starting_bankroll)
+            self.open_bets          = state.get("open_bets", [])
+            self.closed_bets        = state.get("closed_bets", [])
+            self.evaluated_game_ids = set(state.get("evaluated_game_ids", []))
             logger.info(
                 f"PaperBroker loaded — Bankroll: ${self.bankroll:,.2f} | "
                 f"Open: {len(self.open_bets)} | Closed: {len(self.closed_bets)}"

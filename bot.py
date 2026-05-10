@@ -88,9 +88,9 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     except Exception:
         return
 
-    # Skip if already bet on this game (open or already settled)
+    # Skip if already bet on or evaluated (pass decision) for this game
     existing_ids = {b["game_id"] for b in broker.open_bets} | {b["game_id"] for b in broker.closed_bets}
-    if game["game_id"] in existing_ids:
+    if game["game_id"] in existing_ids or game["game_id"] in broker.evaluated_game_ids:
         return
 
     # Skip if too many open bets
@@ -195,8 +195,10 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
             )
     elif claude_rec == "pass" and (home_edge >= min_edge or away_edge >= min_edge):
         logger.info(f"  Edge found but Claude says pass — skipping {away_team} @ {home_team}")
+        broker.mark_evaluated(game["game_id"])
     else:
         logger.info(f"  No value found — passing on {away_team} @ {home_team}")
+        broker.mark_evaluated(game["game_id"])
 
 
 def run_loop():

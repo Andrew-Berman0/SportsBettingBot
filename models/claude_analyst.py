@@ -54,6 +54,7 @@ class ClaudeAnalyst:
             message = self.client.messages.create(
                 model=self.model,
                 max_tokens=1024,
+                temperature=0,
                 messages=[{"role": "user", "content": prompt}],
             )
             raw = message.content[0].text
