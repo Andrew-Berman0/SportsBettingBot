@@ -9,7 +9,6 @@ so the rest of the pipeline needs no changes.
 """
 
 import logging
-from datetime import datetime, timezone, timedelta
 
 import requests
 
@@ -47,33 +46,31 @@ class ActionNetworkFetcher:
         """
         Returns upcoming games with odds as pre-parsed dicts
         (same keys as OddsFetcher.parse_game output, plus _pre_parsed=True).
-        Fetches today and tomorrow to cover late-night games in all timezones.
         """
         league = LEAGUE_MAP.get(sport)
         if not league:
             logger.warning(f"ActionNetwork: no league mapping for {sport}")
             return []
 
-        games: list[dict] = []
-        for offset in (0, 1):
-            date = (datetime.now(timezone.utc) + timedelta(days=offset)).strftime("%Y-%m-%d")
-            raw = self._fetch(league, date)
-            for g in raw:
-                parsed = self._parse_game(g, sport)
-                if parsed:
-                    games.append(parsed)
+        raw = self._fetch(league)
+        games = []
+        for g in raw:
+            parsed = self._parse_game(g, sport)
+            if parsed:
+                games.append(parsed)
 
         logger.info(f"ActionNetwork: {len(games)} games for {sport}")
         return games
 
-    def _fetch(self, league: str, date: str) -> list[dict]:
+    def _fetch(self, league: str) -> list[dict]:
+        # No date param — ActionNetwork returns today's games by default
         url = SCOREBOARD_URL.format(league=league)
         try:
-            resp = self.session.get(url, params={"date": date}, timeout=10)
+            resp = self.session.get(url, timeout=10)
             resp.raise_for_status()
             return resp.json().get("games", [])
         except Exception as e:
-            logger.warning(f"ActionNetwork fetch error ({league} {date}): {e}")
+            logger.warning(f"ActionNetwork fetch error ({league}): {e}")
             return []
 
     def _parse_game(self, g: dict, sport: str) -> dict | None:
