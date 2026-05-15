@@ -86,6 +86,7 @@ class ResultsFetcher:
                 if self._teams_match(b["home_team"], result["home_team"])
                 and self._teams_match(b["away_team"], result["away_team"])
                 and self._game_has_started(b.get("commence_time"), now)
+                and self._result_date_matches(result["date"], b.get("commence_time"))
             ]
             if not matching_bets:
                 continue
@@ -119,5 +120,25 @@ class ResultsFetcher:
         try:
             start = datetime.fromisoformat(commence_time.replace("Z", "+00:00"))
             return start <= now
+        except Exception:
+            return True
+
+    @staticmethod
+    def _result_date_matches(result_date: str, commence_time: str | None) -> bool:
+        """
+        Returns True if the ESPN result's date is on or after the bet's scheduled game date.
+        Prevents a completed game from series game N settling a new bet placed for game N+1.
+        """
+        if not commence_time:
+            return True  # no date stored — don't block settlement
+        try:
+            # Strip sub-second precision before parsing
+            normalized = commence_time
+            if "." in normalized:
+                normalized = normalized[:normalized.index(".")] + normalized[normalized.rindex("Z"):]
+            game_date = datetime.fromisoformat(
+                normalized.replace("Z", "+00:00")
+            ).strftime("%Y-%m-%d")
+            return result_date >= game_date
         except Exception:
             return True

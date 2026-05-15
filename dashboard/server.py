@@ -10,6 +10,7 @@ Run: uvicorn dashboard.server:app --host 0.0.0.0 --port 8000
 import json
 import re
 from collections import deque
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -184,14 +185,33 @@ def trading_equity():
     """Parse equity values from trading bot log to build equity curve."""
     lines = tail_log(TRADING_LOG, n=500)
     points = []
-    for line in lines:
-        if "Equity:" in line:
-            m = re.search(r"(\d{2}:\d{2}:\d{2}).*Equity: \$([\d,]+\.?\d*)", line)
+
+    # Use the log file's mtime as the anchor date for the most recent line,
+    # then walk backwards detecting midnight crossings to assign correct dates.
+    try:
+        anchor = datetime.fromtimestamp(TRADING_LOG.stat().st_mtime, tz=timezone.utc).date()
+    except Exception:
+        anchor = datetime.now(timezone.utc).date()
+
+    current_date = anchor
+    prev_secs = None
+
+    # Walk newest → oldest so we can decrement the date correctly at each midnight crossing
+    for line in reversed(lines):
+        if "Equity:" in line and "Starting equity:" not in line:
+            m = re.search(r"(\d{2}):(\d{2}):(\d{2}).*Equity: \$([\d,]+\.?\d*)", line)
             if m:
+                secs = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3))
+                # Going backwards: if time jumps forward by >1 h, we passed midnight
+                if prev_secs is not None and secs > prev_secs + 3600:
+                    current_date -= timedelta(days=1)
+                prev_secs = secs
                 points.append({
-                    "time":    m.group(1),
-                    "equity":  float(m.group(2).replace(",", "")),
+                    "time":   current_date.isoformat(),
+                    "equity": float(m.group(4).replace(",", "")),
                 })
+
+    points.reverse()  # restore chronological order
     return points
 
 

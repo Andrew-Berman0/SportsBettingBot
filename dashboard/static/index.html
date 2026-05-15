@@ -47,7 +47,7 @@
     .stat-value.red   { color: #ef4444; }
     .stat-value.blue  { color: #60a5fa; }
 
-    .chart-wrap { position: relative; height: 180px; }
+    .chart-wrap { position: relative; height: 220px; }
 
     table { width: 100%; border-collapse: collapse; }
     th { text-align: left; padding: 6px 10px; color: #64748b; font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; border-bottom: 1px solid #2d3148; }
@@ -281,7 +281,14 @@ function renderLog(lines) {
   box.scrollTop = box.scrollHeight;
 }
 
-function makeChart(id, label, color) {
+function fmtChartDate(s) {
+  if (!s || s === 'Start') return s || 'Start';
+  // "2026-05-10" → "May 10"
+  const d = new Date(s + 'T12:00:00');
+  return d.toLocaleDateString('en-US', {month: 'short', day: 'numeric'});
+}
+
+function makeChart(id, label, color, showPoints = false) {
   const ctx = document.getElementById(id).getContext('2d');
   return new Chart(ctx, {
     type: 'line',
@@ -290,17 +297,38 @@ function makeChart(id, label, color) {
       datasets: [{
         label, data: [], borderColor: color,
         backgroundColor: color + '18',
-        borderWidth: 2, pointRadius: 0, fill: true, tension: 0.3,
+        borderWidth: 2,
+        pointRadius: showPoints ? 4 : 0,
+        pointHoverRadius: 6,
+        fill: true, tension: 0.3,
       }]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
+      layout: { padding: { bottom: 4 } },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => '$' + Number(ctx.parsed.y).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}),
+          }
+        }
+      },
       scales: {
-        x: { display: false },
+        x: {
+          display: true,
+          ticks: {
+            color: '#64748b', font: { size: 9 },
+            maxRotation: 0, maxTicksLimit: 8,
+          },
+          grid: { display: false },
+        },
         y: {
           grid: { color: '#1e2135' },
-          ticks: { color: '#64748b', font: { size: 10 } }
+          ticks: {
+            color: '#64748b', font: { size: 10 },
+            callback: v => '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0}),
+          }
         }
       }
     }
@@ -328,7 +356,7 @@ async function fetchBetting() {
 
   // Equity chart
   if (equity.length > 1) {
-    bettingChart.data.labels   = equity.map(p => p.time);
+    bettingChart.data.labels   = equity.map(p => fmtChartDate(p.time));
     bettingChart.data.datasets[0].data = equity.map(p => p.bankroll);
     bettingChart.update();
   }
@@ -417,7 +445,7 @@ async function fetchTrading() {
   document.getElementById('t-ntrain').textContent    = (summary.n_train || 0).toLocaleString() + ' bars';
 
   if (equity.length > 1) {
-    tradingChart.data.labels = equity.map(p => p.time);
+    tradingChart.data.labels = equity.map(p => fmtChartDate(p.time));
     tradingChart.data.datasets[0].data = equity.map(p => p.equity);
     tradingChart.update();
   }
@@ -436,8 +464,8 @@ async function refresh() {
 }
 
 // Init
-bettingChart = makeChart('bettingChart', 'Bankroll', '#60a5fa');
-tradingChart = makeChart('tradingChart', 'Equity',   '#22c55e');
+bettingChart = makeChart('bettingChart', 'Bankroll', '#60a5fa', true);
+tradingChart = makeChart('tradingChart', 'Equity',   '#22c55e', false);
 refresh();
 setInterval(refresh, 30000);  // refresh every 30 seconds
 </script>

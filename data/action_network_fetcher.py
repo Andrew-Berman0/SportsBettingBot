@@ -75,6 +75,10 @@ class ActionNetworkFetcher:
 
     def _parse_game(self, g: dict, sport: str) -> dict | None:
         try:
+            # Only process games that haven't started yet
+            if g.get("status") != "scheduled":
+                return None
+
             teams_by_id = {t["id"]: t for t in g.get("teams", [])}
             home_id = g.get("home_team_id")
             away_id = g.get("away_team_id")
@@ -83,6 +87,14 @@ class ActionNetworkFetcher:
             away_team = teams_by_id.get(away_id, {}).get("full_name")
 
             if not home_team or not away_team:
+                return None
+
+            # Normalize start_time: strip sub-second precision so fromisoformat
+            # handles "2026-05-15T23:00:00.000Z" the same as "2026-05-15T23:00:00Z"
+            raw_start = g.get("start_time") or ""
+            if "." in raw_start and raw_start.endswith("Z"):
+                raw_start = raw_start[:raw_start.index(".")] + "Z"
+            if not raw_start:
                 return None
 
             home_ml = away_ml = total_line = over_odds = under_odds = None
@@ -115,7 +127,7 @@ class ActionNetworkFetcher:
                 "sport":        sport,
                 "home_team":    home_team,
                 "away_team":    away_team,
-                "commence_time": g.get("start_time", ""),
+                "commence_time": raw_start,
                 "home_ml":      home_ml,
                 "away_ml":      away_ml,
                 "total_line":   total_line,
