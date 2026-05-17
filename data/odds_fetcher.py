@@ -10,7 +10,7 @@ Get a free key at: https://the-odds-api.com
 import json
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -44,16 +44,33 @@ class OddsFetcher:
         """
         Returns upcoming games with odds for a given sport.
         sport examples: 'basketball_nba', 'americanfootball_nfl', 'baseball_mlb', 'icehockey_nhl'
+
+        Cache strategy (saves API quota):
+          - Cache < 90 min old  → always use it, no API call
+          - Cache 90 min–6 hrs  → peek at cached commence_times; only call if a game
+                                   is within 4 hours (odds are moving) or no game data exists
+          - Cache > 6 hrs old   → always refresh (pick up newly scheduled games)
+          - No cache            → always call
         """
         cache_file = CACHE_DIR / f"odds_{sport}.json"
+        now = datetime.now(timezone.utc)
 
-        # Use cache if less than 60 minutes old (matches loop interval — 1 API call per tick)
         if cache_file.exists():
             age_minutes = (time.time() - cache_file.stat().st_mtime) / 60
-            if age_minutes < 60:
+
+            if age_minutes < 90:
                 logger.info(f"Odds cache fresh ({age_minutes:.0f}min old) — {sport}")
                 with open(cache_file) as f:
                     return json.load(f)
+
+            if age_minutes < 360:
+                with open(cache_file) as f:
+                    cached = json.load(f)
+                if not self._game_approaching(cached, now, hours=4):
+                    logger.info(
+                        f"Odds cache ({age_minutes:.0f}min old), no game within 4h — skipping API call for {sport}"
+                    )
+                    return cached
 
         if not self.api_key or self.api_key == "your_odds_api_key_here":
             logger.warning("No Odds API key set — returning empty game list")
@@ -99,6 +116,22 @@ class OddsFetcher:
                 return sport, games
         logger.warning("No active sports found with upcoming games")
         return None, []
+
+    @staticmethod
+    def _game_approaching(games: list[dict], now: datetime, hours: int = 4) -> bool:
+        """Returns True if any game in the cached list starts within `hours` from now."""
+        cutoff = now + timedelta(hours=hours)
+        for g in games:
+            ct = g.get("commence_time") or g.get("start_time")
+            if not ct:
+                continue
+            try:
+                start = datetime.fromisoformat(ct.replace("Z", "+00:00"))
+                if now <= start <= cutoff:
+                    return True
+            except Exception:
+                continue
+        return False
 
     @staticmethod
     def parse_game(game: dict) -> dict | None:
