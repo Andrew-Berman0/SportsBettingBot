@@ -95,6 +95,17 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     if game["game_id"] in existing_ids or game["game_id"] in broker.evaluated_game_ids:
         return
 
+    # Skip if we already have an open bet on this same matchup (e.g. a later game in a series
+    # before the prior-game bet has settled)
+    open_matchups = {
+        (b["home_team"].lower().split()[-1], b["away_team"].lower().split()[-1])
+        for b in broker.open_bets
+    }
+    this_matchup = (game["home_team"].lower().split()[-1], game["away_team"].lower().split()[-1])
+    if this_matchup in open_matchups:
+        logger.info(f"Open bet already exists for {game['away_team']} @ {game['home_team']} matchup — skipping until settled")
+        return
+
     # Skip if too many open bets
     if len(broker.open_bets) >= CONFIG.bankroll.max_open_bets:
         logger.info("Max open bets reached — skipping new games")

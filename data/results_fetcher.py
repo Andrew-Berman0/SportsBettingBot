@@ -74,11 +74,24 @@ class ResultsFetcher:
         if not broker.open_bets:
             return 0
 
-        completed = self.get_completed_games(days_back=3)
+        # Look back far enough to cover the oldest open bet (capped at 30 days)
+        now = datetime.now(timezone.utc)
+        days_back = 3
+        for b in broker.open_bets:
+            ct = b.get("commence_time")
+            if ct:
+                try:
+                    start = datetime.fromisoformat(ct.replace("Z", "+00:00"))
+                    days_old = (now - start).days + 1
+                    days_back = max(days_back, days_old)
+                except Exception:
+                    pass
+        days_back = min(days_back, 30)
+
+        completed = self.get_completed_games(days_back=days_back)
         if not completed:
             return 0
 
-        now = datetime.now(timezone.utc)
         settled_count = 0
         for result in completed:
             matching_bets = [
@@ -126,19 +139,19 @@ class ResultsFetcher:
     @staticmethod
     def _result_date_matches(result_date: str, commence_time: str | None) -> bool:
         """
-        Returns True if the ESPN result's date is on or after the bet's scheduled game date.
-        Prevents a completed game from series game N settling a new bet placed for game N+1.
+        Returns True if the ESPN result date is within one day before (or after) the
+        bet's scheduled game date. The -1 day buffer handles games starting at midnight
+        UTC (e.g. 00:30 UTC = 8:30 PM ET the previous day) where ESPN records the
+        local-time date while commence_time is in UTC.
         """
         if not commence_time:
-            return True  # no date stored — don't block settlement
+            return True
         try:
-            # Strip sub-second precision before parsing
             normalized = commence_time
             if "." in normalized:
                 normalized = normalized[:normalized.index(".")] + normalized[normalized.rindex("Z"):]
-            game_date = datetime.fromisoformat(
-                normalized.replace("Z", "+00:00")
-            ).strftime("%Y-%m-%d")
-            return result_date >= game_date
+            game_dt = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+            earliest = (game_dt - timedelta(days=1)).strftime("%Y-%m-%d")
+            return result_date >= earliest
         except Exception:
             return True
