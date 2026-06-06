@@ -76,6 +76,12 @@ class ClaudeAnalyst:
         home_record = f"{home_stats.get('W', '?')}-{home_stats.get('L', '?')}"
         away_record = f"{away_stats.get('W', '?')}-{away_stats.get('L', '?')}"
 
+        def _pct(val) -> str:
+            try:
+                return f"{float(val):.0%}"
+            except (TypeError, ValueError):
+                return "N/A"
+
         def fmt_injuries(injuries: list) -> str:
             if not injuries:
                 return "  None reported"
@@ -100,7 +106,7 @@ HOME TEAM ({home}):
 - Off Rating: {home_stats.get('OFF_RATING', 'N/A')}
 - Def Rating: {home_stats.get('DEF_RATING', 'N/A')}
 - Pace: {home_stats.get('PACE', 'N/A')}
-- Last 10 games: {home_stats.get('win_pct_l10', 'N/A'):.0%} win rate
+- Last 10 games: {_pct(home_stats.get('win_pct_l10'))} win rate
 - Back-to-back: {'Yes' if home_stats.get('is_back_to_back') else 'No'}
 - Rest days: {home_stats.get('rest_days', 'N/A')}
 - Current roster: {home_roster or 'Not available'}
@@ -113,7 +119,7 @@ AWAY TEAM ({away}):
 - Off Rating: {away_stats.get('OFF_RATING', 'N/A')}
 - Def Rating: {away_stats.get('DEF_RATING', 'N/A')}
 - Pace: {away_stats.get('PACE', 'N/A')}
-- Last 10 games: {away_stats.get('win_pct_l10', 'N/A'):.0%} win rate
+- Last 10 games: {_pct(away_stats.get('win_pct_l10'))} win rate
 - Back-to-back: {'Yes' if away_stats.get('is_back_to_back') else 'No'}
 - Rest days: {away_stats.get('rest_days', 'N/A')}
 - Current roster: {away_roster or 'Not available'}

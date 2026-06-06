@@ -1,33 +1,30 @@
 """
 bot.py
 ------
-Main loop for the sports betting bot.
+Event-driven sports betting bot.
 
-Every hour:
-  1. Check which sport is currently in season with upcoming games
-  2. Fetch odds for upcoming games
-  3. Fetch team stats + recent form
-  4. Build features for each game
-  5. Ask Claude to analyze each game and estimate win probability
-  6. Compare our probability to bookmaker implied probability
-  7. If edge > threshold → place paper bet (Kelly-sized)
-  8. Settle any bets from games that have finished
+On each wake:
+  1. Settle any completed bets via ESPN
+  2. Fetch odds for all configured sports (smart cache — only hits the API when needed)
+  3. Evaluate any game within the 2h analysis window
+  4. Sleep until the next meaningful event:
+       - 2h before the next unevaluated game  (pre-game analysis)
+       - 4h after tip-off for any open bet    (settlement check)
+       - 12:00 UTC daily                      (morning discovery refresh)
 
 Run:
   python bot.py
 """
 
-import json
 import logging
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
 load_dotenv()
 
-# Works whether bot.py lives above or inside the SportsBettingBot package directory
 _here = Path(__file__).parent
 sys.path.insert(0, str(_here if (_here / "SportsBettingBot").is_dir() else _here.parent))
 
@@ -54,9 +51,76 @@ logging.basicConfig(
 logger = logging.getLogger("bot")
 
 
+def _hours_until(g: dict) -> float | None:
+    ct = g.get("commence_time")
+    if not ct:
+        return None
+    try:
+        return (
+            datetime.fromisoformat(ct.replace("Z", "+00:00")) - datetime.now(timezone.utc)
+        ).total_seconds() / 3600
+    except Exception:
+        return None
+
+
+def _next_sleep_seconds(all_games_raw: list, broker: PaperBroker, now: datetime) -> int:
+    """
+    Returns seconds until the next meaningful event:
+      - 2h before the next unevaluated game
+      - 4h after tip-off for any open bet (settlement check)
+      - 12:00 UTC the next day (morning discovery)
+    Minimum 5 minutes.
+    """
+    candidates: list[tuple[str, datetime]] = []
+
+    evaluated = broker.evaluated_game_ids
+    bet_ids = {b["game_id"] for b in broker.open_bets} | {b["game_id"] for b in broker.closed_bets}
+
+    for _sport, g in all_games_raw:
+        ct = g.get("commence_time")
+        if not ct:
+            continue
+        gid = str(g.get("game_id") or g.get("id") or "")
+        if gid and (gid in evaluated or gid in bet_ids):
+            continue
+        try:
+            commence = datetime.fromisoformat(ct.replace("Z", "+00:00"))
+            wake_at = commence - timedelta(hours=2)
+            if wake_at > now + timedelta(minutes=5):
+                label = f"pre-game {g.get('away_team','?')} @ {g.get('home_team','?')}"
+                candidates.append((label, wake_at))
+        except Exception:
+            pass
+
+    for bet in broker.open_bets:
+        ct = bet.get("commence_time")
+        if not ct:
+            continue
+        try:
+            start = datetime.fromisoformat(ct.replace("Z", "+00:00"))
+            settle_at = start + timedelta(hours=4)
+            if settle_at > now + timedelta(minutes=5):
+                candidates.append((f"settle {bet['away_team']} @ {bet['home_team']}", settle_at))
+        except Exception:
+            pass
+
+    # Daily morning refresh at 12:00 UTC
+    morning = now.replace(hour=12, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
+    if morning <= now + timedelta(minutes=5):
+        morning += timedelta(days=1)
+    candidates.append(("morning refresh", morning))
+
+    label, next_wake = min(candidates, key=lambda x: x[1])
+    sleep_secs = max(300, int((next_wake - now).total_seconds()))
+    logger.info(
+        f"Sleeping until {next_wake.strftime('%Y-%m-%d %H:%M UTC')} "
+        f"({sleep_secs / 3600:.1f}h) — {label}"
+    )
+    return sleep_secs
+
+
 def get_team_stats(sport: str, team_name: str, nba_fetcher: NBAStatsFetcher,
                    espn_fetcher: ESPNStatsFetcher, nba_stats_df=None) -> dict:
-    """Returns stat dict for a team depending on sport."""
     if sport == "basketball_nba" and nba_stats_df is not None and not nba_stats_df.empty:
         row = nba_stats_df[nba_stats_df["TEAM_NAME"].str.contains(
             team_name.split()[-1], case=False, na=False
@@ -76,37 +140,37 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
                   roster_fetcher: RosterFetcher, nba_stats_df,
                   engineer: FeatureEngineer, claude: ClaudeAnalyst,
                   broker: PaperBroker, lgbm: LGBMPredictor | None = None) -> None:
-    """Run the full analysis pipeline for a single game and place bets if value found."""
+    """Run the full analysis pipeline for a single game and place a bet if value found."""
     game = game_raw if game_raw.get("_pre_parsed") else OddsFetcher.parse_game(game_raw)
     if not game:
         return
 
-    # Only evaluate in the final 1–3 hours — injury reports and odds are sharpest then
+    # Analysis window: bot wakes at 2h before, accept 0.5–2.5h to handle timing drift
     try:
         commence = datetime.fromisoformat(game["commence_time"].replace("Z", "+00:00"))
         hours_until = (commence - datetime.now(timezone.utc)).total_seconds() / 3600
-        if hours_until < 1 or hours_until > 3:
+        if hours_until < 0.5 or hours_until > 2.5:
             return
     except Exception:
         return
 
-    # Skip if already evaluated or already bet on this game
+    # Skip if already evaluated or already have a bet on this game
     existing_ids = {b["game_id"] for b in broker.open_bets} | {b["game_id"] for b in broker.closed_bets}
     if game["game_id"] in existing_ids or game["game_id"] in broker.evaluated_game_ids:
         return
 
-    # Skip if we already have an open bet on this same matchup (e.g. a later game in a series
-    # before the prior-game bet has settled)
+    # Skip if we already have an open bet on this matchup (series game N+1 before N settles)
     open_matchups = {
         (b["home_team"].lower().split()[-1], b["away_team"].lower().split()[-1])
         for b in broker.open_bets
     }
     this_matchup = (game["home_team"].lower().split()[-1], game["away_team"].lower().split()[-1])
     if this_matchup in open_matchups:
-        logger.info(f"Open bet already exists for {game['away_team']} @ {game['home_team']} matchup — skipping until settled")
+        logger.info(
+            f"Open bet already exists for {game['away_team']} @ {game['home_team']} — skipping until settled"
+        )
         return
 
-    # Skip if too many open bets
     if len(broker.open_bets) >= CONFIG.bankroll.max_open_bets:
         logger.info("Max open bets reached — skipping new games")
         return
@@ -117,24 +181,18 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     home_stats = get_team_stats(sport, home_team, nba_fetcher, espn_fetcher, nba_stats_df)
     away_stats = get_team_stats(sport, away_team, nba_fetcher, espn_fetcher, nba_stats_df)
 
-    # Injury report + current roster (NBA only — ESPN API)
     home_injuries, away_injuries = [], []
     home_roster, away_roster = "", ""
     if sport == "basketball_nba":
-        injury_ttl = 30 if hours_until < 6 else 120
-        home_injuries = injury_fetcher.get_team_injuries(home_team, max_age_minutes=injury_ttl)
-        away_injuries = injury_fetcher.get_team_injuries(away_team, max_age_minutes=injury_ttl)
+        home_injuries = injury_fetcher.get_team_injuries(home_team, max_age_minutes=30)
+        away_injuries = injury_fetcher.get_team_injuries(away_team, max_age_minutes=30)
         home_roster   = roster_fetcher.get_roster_string(home_team)
         away_roster   = roster_fetcher.get_roster_string(away_team)
         if home_injuries or away_injuries:
-            logger.info(
-                f"  Injuries — {home_team}: {len(home_injuries)} | {away_team}: {len(away_injuries)}"
-            )
+            logger.info(f"  Injuries — {home_team}: {len(home_injuries)} | {away_team}: {len(away_injuries)}")
 
-    # Build feature snapshot (saved with bet for future model training)
     features = engineer.build_game_features(game, home_stats, away_stats)
 
-    # Base probability: LightGBM model if available, else market implied
     book_home_prob = game.get("home_implied") or 0.5
     book_away_prob = game.get("away_implied") or 0.5
 
@@ -148,7 +206,6 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     else:
         base_home_prob = book_home_prob
 
-    # Claude analysis — receives model probability as starting point
     logger.info(f"Analyzing: {away_team} @ {home_team} ({hours_until:.1f}h away)")
     analysis = claude.analyze_game(game, home_stats, away_stats, base_home_prob,
                                    home_injuries=home_injuries, away_injuries=away_injuries,
@@ -156,7 +213,6 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
 
     our_home_prob = analysis["adjusted_home_prob"]
     our_away_prob = 1 - our_home_prob
-
     home_edge = our_home_prob - book_home_prob
     away_edge = our_away_prob - book_away_prob
 
@@ -167,52 +223,45 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     )
     logger.info(f"  Reasoning: {analysis['reasoning']}")
 
-    # --- Place bets where edge exceeds threshold AND Claude agrees ---
     min_edge   = CONFIG.bankroll.min_edge
-    claude_rec = analysis["bet_recommendation"]  # "home_ml" | "away_ml" | "over" | "under" | "pass"
+    claude_rec = analysis["bet_recommendation"]
 
-    # Scale Kelly fraction by confidence: high=1.0x, medium=0.5x, low=0.25x
     _conf_multiplier = {"high": 1.0, "medium": 0.5, "low": 0.25}.get(analysis["confidence"], 0.5)
     kelly = CONFIG.bankroll.kelly_fraction * _conf_multiplier
-    logger.info(f"  Confidence={analysis['confidence']} → Kelly multiplier={_conf_multiplier:.2f}x (effective Kelly={kelly:.3f})")
+    logger.info(
+        f"  Confidence={analysis['confidence']} → Kelly multiplier={_conf_multiplier:.2f}x "
+        f"(effective Kelly={kelly:.3f})"
+    )
 
     if home_edge >= min_edge and claude_rec == "home_ml" and game.get("home_ml") is not None:
-        stake = broker.kelly_stake(our_home_prob, game["home_ml"], kelly)
-        max_stake = broker.bankroll * CONFIG.bankroll.max_bet_pct
-        stake = min(stake, max_stake)
+        stake = min(broker.kelly_stake(our_home_prob, game["home_ml"], kelly),
+                    broker.bankroll * CONFIG.bankroll.max_bet_pct)
         if stake >= 5.0:
             broker.place_bet(
                 game_id=game["game_id"], sport=sport,
                 home_team=home_team, away_team=away_team,
                 bet_type="home_ml", odds=game["home_ml"], stake=stake,
                 reasoning=analysis["reasoning"],
-                claude_home_prob=our_home_prob,
-                book_home_prob=book_home_prob,
-                features=features,
-                commence_time=game.get("commence_time"),
+                claude_home_prob=our_home_prob, book_home_prob=book_home_prob,
+                features=features, commence_time=game.get("commence_time"),
             )
-
     elif away_edge >= min_edge and claude_rec == "away_ml" and game.get("away_ml") is not None:
-        stake = broker.kelly_stake(our_away_prob, game["away_ml"], kelly)
-        max_stake = broker.bankroll * CONFIG.bankroll.max_bet_pct
-        stake = min(stake, max_stake)
+        stake = min(broker.kelly_stake(our_away_prob, game["away_ml"], kelly),
+                    broker.bankroll * CONFIG.bankroll.max_bet_pct)
         if stake >= 5.0:
             broker.place_bet(
                 game_id=game["game_id"], sport=sport,
                 home_team=home_team, away_team=away_team,
                 bet_type="away_ml", odds=game["away_ml"], stake=stake,
                 reasoning=analysis["reasoning"],
-                claude_home_prob=our_home_prob,
-                book_home_prob=book_home_prob,
-                features=features,
-                commence_time=game.get("commence_time"),
+                claude_home_prob=our_home_prob, book_home_prob=book_home_prob,
+                features=features, commence_time=game.get("commence_time"),
             )
     elif claude_rec == "pass" and (home_edge >= min_edge or away_edge >= min_edge):
         logger.info(f"  Edge found but Claude says pass — skipping {away_team} @ {home_team}")
     else:
         logger.info(f"  No value found — passing on {away_team} @ {home_team}")
 
-    # Mark as evaluated so we don't re-analyze this game on future ticks
     broker.mark_evaluated(game["game_id"])
 
 
@@ -226,7 +275,7 @@ def run_loop():
     engineer        = FeatureEngineer()
     claude          = ClaudeAnalyst(api_key=CONFIG.claude.api_key, model=CONFIG.claude.model)
     broker          = PaperBroker(starting_bankroll=CONFIG.bankroll.starting_bankroll)
-    lgbm            = LGBMPredictor.load()  # None if model not yet trained
+    lgbm            = LGBMPredictor.load()
 
     logger.info("=" * 60)
     logger.info("Sports Betting Bot started [PAPER MODE]")
@@ -234,39 +283,49 @@ def run_loop():
     logger.info(f"Min edge: {CONFIG.bankroll.min_edge:.0%}  |  Kelly fraction: {CONFIG.bankroll.kelly_fraction}")
     logger.info("=" * 60)
 
+    all_games_raw: list[tuple[str, dict]] = []
+
     while True:
         try:
             now = datetime.now(timezone.utc)
-            logger.info(f"--- Loop tick: {now.strftime('%Y-%m-%d %H:%M UTC')} ---")
+            logger.info(f"--- Wake: {now.strftime('%Y-%m-%d %H:%M UTC')} ---")
 
-            # Settle any completed games first
+            # 1. Settle any completed bets
             if broker.open_bets:
                 n_settled = results_fetcher.settle_open_bets(broker)
                 if n_settled:
                     logger.info(f"Auto-settled {n_settled} bet(s) from completed games.")
                     broker.export_training_data("training_data.csv")
 
-            # Find active sport with upcoming games
-            sport, games_raw = odds_fetcher.get_active_sport(
-                CONFIG.sports.sports, CONFIG.sports.bookmakers
-            )
+            # 2. Fetch all sports (cache handles rate limiting; pre-game wake forces fresh call)
+            all_games_raw = []
+            for sport in CONFIG.sports.sports:
+                games = odds_fetcher.get_upcoming_games(sport, CONFIG.sports.bookmakers)
+                for g in games:
+                    all_games_raw.append((sport, g))
 
-            if sport and games_raw:
-                # Fetch team stats once per loop
-                nba_stats_df = None
+            total_games = len(all_games_raw)
+            logger.info(f"Upcoming games across all sports: {total_games}")
+
+            # 3. Fetch NBA stats only if an NBA game is in the analysis window
+            nba_stats_df = None
+            for sport, g in all_games_raw:
                 if sport == "basketball_nba":
-                    nba_stats_df = nba_fetcher.get_team_stats()
+                    h = _hours_until(g)
+                    if h is not None and 0.5 <= h <= 2.5:
+                        nba_stats_df = nba_fetcher.get_team_stats()
+                        break
 
-                for game_raw in games_raw:
-                    evaluate_game(
-                        game_raw, sport, nba_fetcher, espn_fetcher,
-                        injury_fetcher, roster_fetcher, nba_stats_df,
-                        engineer, claude, broker, lgbm,
-                    )
-            else:
-                logger.info("No active sports right now — no bets to evaluate")
+            # 4. Evaluate games in analysis window
+            for sport, game_raw in all_games_raw:
+                evaluate_game(
+                    game_raw, sport, nba_fetcher, espn_fetcher,
+                    injury_fetcher, roster_fetcher,
+                    nba_stats_df if sport == "basketball_nba" else None,
+                    engineer, claude, broker, lgbm,
+                )
 
-            # Print summary every loop
+            # 5. Summary
             summary = broker.summary()
             logger.info(
                 f"BANKROLL: ${summary['bankroll']:,.2f} | "
@@ -282,8 +341,7 @@ def run_loop():
         except Exception as e:
             logger.error(f"Loop error: {e}", exc_info=True)
 
-        logger.info(f"Sleeping {CONFIG.loop_interval_seconds // 60} minutes...")
-        time.sleep(CONFIG.loop_interval_seconds)
+        time.sleep(_next_sleep_seconds(all_games_raw, broker, now))
 
 
 if __name__ == "__main__":
