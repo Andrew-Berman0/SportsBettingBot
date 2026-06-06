@@ -85,7 +85,7 @@ async def index(request: Request):
     state = _load_state()
 
     closed = [_prepare_bet(b) for b in state["closed_bets"]]
-    closed.sort(key=lambda b: b.get("settled_at", ""), reverse=True)
+    closed.sort(key=lambda b: b.get("commence_time", ""), reverse=True)
 
     open_bets = [_prepare_bet(b) for b in state["open_bets"]]
 
