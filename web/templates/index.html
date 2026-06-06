@@ -6,6 +6,16 @@
   <title>WWAID — What Would AI Do?</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="shortcut icon" href="/static/favicon.svg">
+  <!-- Open Graph / social sharing -->
+  <meta property="og:type"        content="website">
+  <meta property="og:url"         content="https://wwaid.live/">
+  <meta property="og:title"       content="WWAID — What Would AI Do?">
+  <meta property="og:description" content="An AI-powered paper trading sports betting experiment. Watch Claude analyze games in real time.">
+  <meta property="og:image"       content="https://wwaid.live/static/og-image.png">
+  <meta name="twitter:card"       content="summary_large_image">
+  <meta name="twitter:title"      content="WWAID — What Would AI Do?">
+  <meta name="twitter:description" content="An AI-powered paper trading sports betting experiment. Watch Claude analyze games in real time.">
+  <meta name="twitter:image"      content="https://wwaid.live/static/og-image.png">
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -118,6 +128,7 @@
             <tr class="border-b border-slate-700 text-xs text-slate-400 uppercase tracking-wider">
               <th class="px-5 py-3 text-left font-medium">Sport</th>
               <th class="px-5 py-3 text-left font-medium">Matchup</th>
+              <th class="px-5 py-3 text-left font-medium">Game Time</th>
               <th class="px-5 py-3 text-left font-medium">Bet</th>
               <th class="px-5 py-3 text-left font-medium">Odds</th>
               <th class="px-5 py-3 text-left font-medium">Stake</th>
@@ -133,6 +144,7 @@
                 <span class="sport-pill sport-{{ bet.sport_label | lower }}">{{ bet.sport_label }}</span>
               </td>
               <td class="px-5 py-3 font-medium text-white">{{ bet.matchup }}</td>
+              <td class="px-5 py-3 text-slate-400 text-xs">{{ bet.game_time }}</td>
               <td class="px-5 py-3 text-slate-300">{{ bet.bet_label }} · <span class="text-white">{{ bet.bet_team }}</span></td>
               <td class="px-5 py-3 font-mono text-slate-200">{{ bet.odds_str }}</td>
               <td class="px-5 py-3 text-slate-300">{{ bet.stake_str }}</td>
@@ -141,7 +153,7 @@
             </tr>
 
             <tr id="ob-{{ loop.index }}" class="reasoning-row border-b border-slate-700/40 bg-slate-900/60">
-              <td colspan="7" class="px-6 py-5">
+              <td colspan="8" class="px-6 py-5">
                 <div class="flex gap-6">
                   <div class="flex-1">
                     <p class="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-2">Claude's Reasoning</p>

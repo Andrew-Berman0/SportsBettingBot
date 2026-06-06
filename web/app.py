@@ -8,6 +8,9 @@ Public dashboard for the AI paper-trading sports betting experiment.
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
+
+ET = ZoneInfo("America/New_York")
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
@@ -57,6 +60,12 @@ def _prepare_bet(bet: dict) -> dict:
     b["odds_str"]    = _fmt_odds(b.get("odds", 0))
     b["stake_str"]   = f"${b['stake']:.2f}"
     b["placed_date"] = _fmt_date(b.get("placed_at", ""), "%b %d, %H:%M UTC")
+    try:
+        ct = b.get("commence_time", "")
+        dt = datetime.fromisoformat(ct.replace("Z", "+00:00")).astimezone(ET)
+        b["game_time"] = dt.strftime("%-I:%M %p ET · %b %-d")
+    except Exception:
+        b["game_time"] = ""
     b["to_win"]      = b.get("potential_payout", 0) - b.get("stake", 0)
 
     if b.get("status") in ("won", "lost"):
