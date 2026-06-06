@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 ET = ZoneInfo("America/New_York")
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -80,6 +80,11 @@ def _prepare_bet(bet: dict) -> dict:
     return b
 
 
+@app.get("/google5a1c10f341626ed7.html", response_class=PlainTextResponse)
+async def google_verification():
+    return "google-site-verification: google5a1c10f341626ed7.html"
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     state = _load_state()
@@ -120,7 +125,7 @@ async def index(request: Request):
     # P&L bar chart (chronological)
     pnl_labels = [b["matchup"] for b in history_bets]
     pnl_values = [round(b["pnl"], 2) for b in history_bets]
-    pnl_colors = ["#10b981" if v >= 0 else "#ef4444" for v in pnl_values]
+    pnl_colors = ["#39FF14" if v >= 0 else "#ff4444" for v in pnl_values]
 
     # Per-sport breakdown
     sport_stats: dict[str, dict] = {}
