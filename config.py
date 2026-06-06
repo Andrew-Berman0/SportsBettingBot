@@ -13,8 +13,7 @@ class SportsConfig:
 @dataclass
 class BankrollConfig:
     starting_bankroll: float = 10000.0   # paper bankroll
-    kelly_fraction: float = 0.25         # quarter Kelly (conservative)
-    max_bet_pct: float = 0.05            # never more than 5% on one game
+    flat_bet_pct: float = 0.025          # 2.5% of current bankroll per bet
     min_edge: float = 0.03               # only bet if edge > 3%
     max_open_bets: int = 5               # max simultaneous bets
     min_odds: float = -300               # avoid heavy favorites (implied > 75%)

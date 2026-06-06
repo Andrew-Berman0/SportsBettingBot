@@ -36,7 +36,6 @@ from SportsBettingBot.data.roster_fetcher import RosterFetcher
 from SportsBettingBot.data.results_fetcher import ResultsFetcher
 from SportsBettingBot.features.engineer import FeatureEngineer
 from SportsBettingBot.models.claude_analyst import ClaudeAnalyst
-from SportsBettingBot.models.lgbm_predictor import LGBMPredictor
 from SportsBettingBot.broker.paper_broker import PaperBroker
 
 logging.basicConfig(
@@ -146,7 +145,7 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
                   espn_fetcher: ESPNStatsFetcher, injury_fetcher: InjuryFetcher,
                   roster_fetcher: RosterFetcher, nba_stats_df, espn_stats_df,
                   engineer: FeatureEngineer, claude: ClaudeAnalyst,
-                  broker: PaperBroker, lgbm: LGBMPredictor | None = None) -> None:
+                  broker: PaperBroker) -> None:
     """Run the full analysis pipeline for a single game and place a bet if value found."""
     game = game_raw if game_raw.get("_pre_parsed") else OddsFetcher.parse_game(game_raw)
     if not game:
@@ -202,15 +201,7 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     book_home_prob = game.get("home_implied") or 0.5
     book_away_prob = game.get("away_implied") or 0.5
 
-    if lgbm and sport == "basketball_nba":
-        lgbm_prob = lgbm.predict(
-            home_team, away_team, home_stats, away_stats,
-            book_home_prob, book_away_prob,
-        )
-        logger.info(f"  LightGBM: home={lgbm_prob:.1%}  |  Market: home={book_home_prob:.1%}")
-        base_home_prob = lgbm_prob
-    else:
-        base_home_prob = book_home_prob
+    base_home_prob = book_home_prob
 
     logger.info(f"Analyzing: {away_team} @ {home_team} ({hours_until:.1f}h away)")
     analysis = claude.analyze_game(game, home_stats, away_stats, base_home_prob,
@@ -233,16 +224,10 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     min_edge   = CONFIG.bankroll.min_edge
     claude_rec = analysis["bet_recommendation"]
 
-    _conf_multiplier = {"high": 1.0, "medium": 0.5, "low": 0.25}.get(analysis["confidence"], 0.5)
-    kelly = CONFIG.bankroll.kelly_fraction * _conf_multiplier
-    logger.info(
-        f"  Confidence={analysis['confidence']} → Kelly multiplier={_conf_multiplier:.2f}x "
-        f"(effective Kelly={kelly:.3f})"
-    )
+    stake = round(broker.bankroll * CONFIG.bankroll.flat_bet_pct, 2)
+    logger.info(f"  Flat stake: ${stake:.2f} ({CONFIG.bankroll.flat_bet_pct:.1%} of bankroll)")
 
     if home_edge >= min_edge and claude_rec == "home_ml" and game.get("home_ml") is not None:
-        stake = min(broker.kelly_stake(our_home_prob, game["home_ml"], kelly),
-                    broker.bankroll * CONFIG.bankroll.max_bet_pct)
         if stake >= 5.0:
             broker.place_bet(
                 game_id=game["game_id"], sport=sport,
@@ -253,8 +238,6 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
                 features=features, commence_time=game.get("commence_time"),
             )
     elif away_edge >= min_edge and claude_rec == "away_ml" and game.get("away_ml") is not None:
-        stake = min(broker.kelly_stake(our_away_prob, game["away_ml"], kelly),
-                    broker.bankroll * CONFIG.bankroll.max_bet_pct)
         if stake >= 5.0:
             broker.place_bet(
                 game_id=game["game_id"], sport=sport,
@@ -282,12 +265,11 @@ def run_loop():
     engineer        = FeatureEngineer()
     claude          = ClaudeAnalyst(api_key=CONFIG.claude.api_key, model=CONFIG.claude.model)
     broker          = PaperBroker(starting_bankroll=CONFIG.bankroll.starting_bankroll)
-    lgbm            = LGBMPredictor.load()
 
     logger.info("=" * 60)
     logger.info("Sports Betting Bot started [PAPER MODE]")
     logger.info(f"Sports: {CONFIG.sports.sports}")
-    logger.info(f"Min edge: {CONFIG.bankroll.min_edge:.0%}  |  Kelly fraction: {CONFIG.bankroll.kelly_fraction}")
+    logger.info(f"Min edge: {CONFIG.bankroll.min_edge:.0%}  |  Flat bet: {CONFIG.bankroll.flat_bet_pct:.1%} of bankroll")
     logger.info("=" * 60)
 
     all_games_raw: list[tuple[str, dict]] = []
@@ -333,7 +315,7 @@ def run_loop():
                     injury_fetcher, roster_fetcher,
                     nba_stats_df if sport == "basketball_nba" else None,
                     espn_stats_cache.get(sport),
-                    engineer, claude, broker, lgbm,
+                    engineer, claude, broker,
                 )
 
             # 5. Summary

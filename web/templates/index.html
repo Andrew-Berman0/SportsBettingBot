@@ -55,7 +55,7 @@
 <body class="text-[#e5e7eb] min-h-screen">
 
   <!-- ── Header ─────────────────────────────────────────────── -->
-  <header class="border-b border-[#1a1a1a]">
+  <header class="border-b border-[#2a2a2a]">
     <div class="max-w-7xl mx-auto px-6 py-5 flex items-end justify-between">
       <div>
         <div class="flex items-center gap-3">
@@ -65,41 +65,60 @@
             PAPER TRADING
           </span>
         </div>
-        <p class="text-[#6b7280] text-sm mt-0.5">What Would AI Do? — an AI sports betting experiment</p>
+        <p class="text-[#9ca3af] text-sm mt-0.5">What Would AI Do? — an AI sports betting experiment</p>
+        <div class="flex flex-wrap gap-1.5 mt-2">
+          <span class="sport-pill sport-nba">NBA</span>
+          <span class="sport-pill sport-wnba">WNBA</span>
+          <span class="sport-pill sport-mlb">MLB</span>
+          <span class="sport-pill sport-nhl">NHL</span>
+          <span class="sport-pill sport-nfl">NFL</span>
+        </div>
       </div>
-      <p class="text-xs text-[#3a3a3a] pb-1">Updated {{ last_updated }}</p>
+      <p class="text-xs text-[#6b7280] pb-1">Updated {{ last_updated }}</p>
     </div>
   </header>
 
   <main class="max-w-7xl mx-auto px-6 py-8 space-y-8">
 
+    <!-- ── Explainer ─────────────────────────────────────────── -->
+    <div class="rounded-2xl border border-[#2a2a2a] bg-[#111111] px-6 py-4 flex gap-3 items-start">
+      <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color:#39FF14">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20A10 10 0 0012 2z"/>
+      </svg>
+      <p class="text-[#9ca3af] text-sm leading-relaxed">
+        Claude monitors upcoming games across all five sports and only places a bet when it detects a
+        <span class="text-white font-medium">meaningful edge over the market odds</span> with reasonable confidence.
+        Most games are passed on. Bets are sized automatically using a fractional Kelly criterion.
+      </p>
+    </div>
+
     <!-- ── Hero stats ─────────────────────────────────────────── -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
 
-      <div class="bg-[#111111] rounded-2xl p-5 border border-[#1f1f1f]">
-        <p class="text-[#6b7280] text-xs font-medium uppercase tracking-wider mb-1">Bankroll</p>
+      <div class="bg-[#111111] rounded-2xl p-5 border border-[#333333]">
+        <p class="text-[#9ca3af] text-xs font-medium uppercase tracking-wider mb-1">Bankroll</p>
         <p class="text-3xl font-bold text-white">${{ "%.2f"|format(stats.bankroll) }}</p>
-        <p class="text-xs text-[#3a3a3a] mt-1">Started $10,000.00</p>
+        <p class="text-xs text-[#6b7280] mt-1">Started $10,000.00</p>
       </div>
 
-      <div class="bg-[#111111] rounded-2xl p-5 border border-[#1f1f1f]">
-        <p class="text-[#6b7280] text-xs font-medium uppercase tracking-wider mb-1">All-time P&amp;L</p>
+      <div class="bg-[#111111] rounded-2xl p-5 border border-[#333333]">
+        <p class="text-[#9ca3af] text-xs font-medium uppercase tracking-wider mb-1">All-time P&amp;L</p>
         <p class="text-3xl font-bold" style="color:{{ '#39FF14' if stats.total_pnl >= 0 else '#ff4444' }}">
           {{ '+' if stats.total_pnl >= 0 else '' }}${{ "%.2f"|format(stats.total_pnl) }}
         </p>
-        <p class="text-xs text-[#3a3a3a] mt-1">ROI: {{ '+' if stats.roi >= 0 else '' }}{{ "%.1f"|format(stats.roi) }}%</p>
+        <p class="text-xs text-[#6b7280] mt-1">ROI: {{ '+' if stats.roi >= 0 else '' }}{{ "%.1f"|format(stats.roi) }}%</p>
       </div>
 
-      <div class="bg-[#111111] rounded-2xl p-5 border border-[#1f1f1f]">
-        <p class="text-[#6b7280] text-xs font-medium uppercase tracking-wider mb-1">Record</p>
+      <div class="bg-[#111111] rounded-2xl p-5 border border-[#333333]">
+        <p class="text-[#9ca3af] text-xs font-medium uppercase tracking-wider mb-1">Record</p>
         <p class="text-3xl font-bold text-white">{{ stats.wins }}–{{ stats.losses }}</p>
-        <p class="text-xs text-[#3a3a3a] mt-1">{{ "%.0f"|format(stats.win_rate) }}% win rate</p>
+        <p class="text-xs text-[#6b7280] mt-1">{{ "%.0f"|format(stats.win_rate) }}% win rate</p>
       </div>
 
-      <div class="bg-[#111111] rounded-2xl p-5 border border-[#1f1f1f]">
-        <p class="text-[#6b7280] text-xs font-medium uppercase tracking-wider mb-1">Total Bets</p>
+      <div class="bg-[#111111] rounded-2xl p-5 border border-[#333333]">
+        <p class="text-[#9ca3af] text-xs font-medium uppercase tracking-wider mb-1">Total Bets</p>
         <p class="text-3xl font-bold text-white">{{ stats.total_bets }}</p>
-        <p class="text-xs text-[#3a3a3a] mt-1">
+        <p class="text-xs text-[#6b7280] mt-1">
           {% for sport, s in sport_stats.items() %}
             {{ sport }} {{ s.wins }}–{{ s.losses }}{% if not loop.last %} · {% endif %}
           {% endfor %}
@@ -111,31 +130,32 @@
     <!-- ── Charts ─────────────────────────────────────────────── -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-      <div class="bg-[#111111] rounded-2xl p-6 border border-[#1f1f1f]">
-        <h2 class="text-xs font-semibold text-[#6b7280] uppercase tracking-wider mb-4">Bankroll Over Time</h2>
+      <div class="bg-[#111111] rounded-2xl p-6 border border-[#333333]">
+        <h2 class="text-xs font-semibold text-[#9ca3af] uppercase tracking-wider mb-4">Bankroll Over Time</h2>
         <canvas id="bankrollChart"></canvas>
       </div>
 
-      <div class="bg-[#111111] rounded-2xl p-6 border border-[#1f1f1f]">
-        <h2 class="text-xs font-semibold text-[#6b7280] uppercase tracking-wider mb-4">P&amp;L Per Bet</h2>
+      <div class="bg-[#111111] rounded-2xl p-6 border border-[#333333]">
+        <h2 class="text-xs font-semibold text-[#9ca3af] uppercase tracking-wider mb-4">P&amp;L Per Bet</h2>
         <canvas id="pnlChart"></canvas>
       </div>
 
     </div>
 
     <!-- ── Live open bets ──────────────────────────────────────── -->
-    {% if open_bets %}
     <div>
-      <h2 class="text-xs font-semibold text-[#6b7280] uppercase tracking-wider mb-3 flex items-center gap-2">
+      <h2 class="text-xs font-semibold text-[#9ca3af] uppercase tracking-wider mb-3 flex items-center gap-2">
         Live Bets
+        {% if open_bets %}
         <span class="w-2 h-2 rounded-full animate-pulse inline-block" style="background:#39FF14"></span>
-        <span class="normal-case font-normal text-[#3a3a3a]">(click any row to see Claude's reasoning)</span>
+        {% endif %}
+        <span class="normal-case font-normal text-[#6b7280]">(click any row to see Claude's reasoning)</span>
       </h2>
-      <div class="bg-[#111111] rounded-2xl border border-[#1f1f1f] overflow-hidden">
+      <div class="bg-[#111111] rounded-2xl border border-[#333333] overflow-hidden">
         <div class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead>
-            <tr class="border-b border-[#1f1f1f] text-xs text-[#6b7280] uppercase tracking-wider">
+            <tr class="border-b border-[#333333] text-xs text-[#9ca3af] uppercase tracking-wider">
               <th class="px-5 py-3 text-left font-medium">Sport</th>
               <th class="px-5 py-3 text-left font-medium">Matchup</th>
               <th class="px-5 py-3 text-left font-medium">Game Time</th>
@@ -148,7 +168,7 @@
           </thead>
           <tbody>
             {% for bet in open_bets %}
-            <tr class="bet-row border-b border-[#1a1a1a] transition-colors"
+            <tr class="bet-row border-b border-[#2a2a2a] transition-colors"
                 style="--tw-bg-opacity:1"
                 onmouseenter="this.style.background='rgba(57,255,20,0.03)'"
                 onmouseleave="this.style.background=''"
@@ -157,44 +177,51 @@
                 <span class="sport-pill sport-{{ bet.sport_label | lower }}">{{ bet.sport_label }}</span>
               </td>
               <td class="px-5 py-3 font-medium text-white">{{ bet.matchup }}</td>
-              <td class="px-5 py-3 text-[#6b7280] text-xs">{{ bet.game_time }}</td>
-              <td class="px-5 py-3 text-[#9ca3af]">{{ bet.bet_label }} · <span class="text-white">{{ bet.bet_team }}</span></td>
+              <td class="px-5 py-3 text-[#9ca3af] text-xs">{{ bet.game_time }}</td>
+              <td class="px-5 py-3 text-[#c9d1d9]">{{ bet.bet_label }} · <span class="text-white">{{ bet.bet_team }}</span></td>
               <td class="px-5 py-3 font-mono text-[#d1d5db]">{{ bet.odds_str }}</td>
-              <td class="px-5 py-3 text-[#9ca3af]">{{ bet.stake_str }}</td>
+              <td class="px-5 py-3 text-[#c9d1d9]">{{ bet.stake_str }}</td>
               <td class="px-5 py-3 font-medium" style="color:#39FF14">${{ "%.2f"|format(bet.to_win) }}</td>
-              <td class="px-5 py-3 text-[#4b5563] text-xs">{{ bet.placed_date }}</td>
+              <td class="px-5 py-3 text-[#6b7280] text-xs">{{ bet.placed_date }}</td>
             </tr>
 
-            <tr id="ob-{{ loop.index }}" class="reasoning-row border-b border-[#1a1a1a]" style="background:#0a0a0a">
+            <tr id="ob-{{ loop.index }}" class="reasoning-row border-b border-[#2a2a2a]" style="background:#0a0a0a">
               <td colspan="8" class="px-6 py-5">
                 <div class="flex gap-6">
                   <div class="flex-1">
                     <p class="text-xs font-semibold uppercase tracking-wider mb-2" style="color:#39FF14">Claude's Reasoning</p>
-                    <p class="text-[#9ca3af] text-sm leading-relaxed">{{ bet.reasoning or "No reasoning recorded." }}</p>
+                    <p class="text-[#c9d1d9] text-sm leading-relaxed">{{ bet.reasoning or "No reasoning recorded." }}</p>
                   </div>
-                  <div class="text-xs text-[#4b5563] space-y-1 min-w-[200px]">
-                    <p><span class="text-[#6b7280]">AI estimate:</span> {{ "%.0f"|format((bet.claude_home_prob or 0) * 100) }}% home win</p>
-                    <p><span class="text-[#6b7280]">Market implied:</span> {{ "%.0f"|format((bet.book_home_prob or 0) * 100) }}% home win</p>
+                  <div class="text-xs text-[#6b7280] space-y-1 min-w-[200px]">
+                    <p><span class="text-[#9ca3af]">AI estimate:</span> {{ "%.0f"|format((bet.claude_home_prob or 0) * 100) }}% home win</p>
+                    <p><span class="text-[#9ca3af]">Market implied:</span> {{ "%.0f"|format((bet.book_home_prob or 0) * 100) }}% home win</p>
                   </div>
                 </div>
               </td>
             </tr>
             {% endfor %}
+            {% if not open_bets %}
+            <tr>
+              <td colspan="8" class="px-5 py-10 text-center">
+                <p class="text-[#9ca3af] text-sm font-medium">No live bets right now</p>
+                <p class="text-[#6b7280] text-xs mt-1">Claude is monitoring upcoming games — check back soon.</p>
+              </td>
+            </tr>
+            {% endif %}
           </tbody>
         </table>
         </div>
       </div>
     </div>
-    {% endif %}
 
     <!-- ── Picks log ───────────────────────────────────────────── -->
     <div>
       <div class="flex items-center justify-between mb-3">
-        <h2 class="text-xs font-semibold text-[#6b7280] uppercase tracking-wider">
-          Picks Log <span class="normal-case font-normal text-[#3a3a3a] ml-1">(click any row to see Claude's reasoning)</span>
+        <h2 class="text-xs font-semibold text-[#9ca3af] uppercase tracking-wider">
+          Picks Log <span class="normal-case font-normal text-[#6b7280] ml-1">(click any row to see Claude's reasoning)</span>
         </h2>
         <div class="flex items-center gap-2">
-          <label class="text-xs text-[#6b7280] font-medium">Sport:</label>
+          <label class="text-xs text-[#9ca3af] font-medium">Sport:</label>
           <select id="sportFilter" onchange="filterSport()"
                   class="text-xs rounded-lg px-3 py-1.5 focus:outline-none cursor-pointer"
                   style="background:#141414;color:#d1d5db;border:1px solid #2a2a2a">
@@ -206,11 +233,11 @@
         </div>
       </div>
 
-      <div class="bg-[#111111] rounded-2xl border border-[#1f1f1f] overflow-hidden">
+      <div class="bg-[#111111] rounded-2xl border border-[#333333] overflow-hidden">
         <div class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead>
-            <tr class="border-b border-[#1f1f1f] text-xs text-[#6b7280] uppercase tracking-wider">
+            <tr class="border-b border-[#333333] text-xs text-[#9ca3af] uppercase tracking-wider">
               <th class="px-5 py-3 text-left font-medium">Game Time</th>
               <th class="px-5 py-3 text-left font-medium">Sport</th>
               <th class="px-5 py-3 text-left font-medium">Matchup</th>
@@ -224,20 +251,20 @@
           <tbody id="picksBody">
             {% for bet in closed_bets %}
 
-            <tr class="bet-row border-b border-[#1a1a1a] transition-colors"
+            <tr class="bet-row border-b border-[#2a2a2a] transition-colors"
                 data-sport="{{ bet.sport_label }}"
                 data-idx="{{ loop.index }}"
                 onmouseenter="this.style.background='rgba(57,255,20,0.03)'"
                 onmouseleave="this.style.background=''"
                 onclick="toggleRow('r-{{ loop.index }}')">
-              <td class="px-5 py-3 text-[#6b7280] text-xs">{{ bet.game_time or "—" }}</td>
+              <td class="px-5 py-3 text-[#9ca3af] text-xs">{{ bet.game_time or "—" }}</td>
               <td class="px-5 py-3">
                 <span class="sport-pill sport-{{ bet.sport_label | lower }}">{{ bet.sport_label }}</span>
               </td>
               <td class="px-5 py-3 font-medium text-white">{{ bet.matchup }}</td>
-              <td class="px-5 py-3 text-[#9ca3af] text-xs">{{ bet.bet_label }} · <span class="text-white">{{ bet.bet_team }}</span></td>
+              <td class="px-5 py-3 text-[#c9d1d9] text-xs">{{ bet.bet_label }} · <span class="text-white">{{ bet.bet_team }}</span></td>
               <td class="px-5 py-3 font-mono text-[#d1d5db] text-xs">{{ bet.odds_str }}</td>
-              <td class="px-5 py-3 text-[#9ca3af] text-xs">{{ bet.stake_str }}</td>
+              <td class="px-5 py-3 text-[#c9d1d9] text-xs">{{ bet.stake_str }}</td>
               <td class="px-5 py-3">
                 {% if bet.won %}
                 <span class="text-xs font-semibold px-2 py-0.5 rounded border"
@@ -251,18 +278,18 @@
               </td>
             </tr>
 
-            <tr id="r-{{ loop.index }}" class="reasoning-row border-b border-[#1a1a1a]" style="background:#0a0a0a">
+            <tr id="r-{{ loop.index }}" class="reasoning-row border-b border-[#2a2a2a]" style="background:#0a0a0a">
               <td colspan="8" class="px-6 py-5">
                 <div class="flex gap-6">
                   <div class="flex-1">
                     <p class="text-xs font-semibold uppercase tracking-wider mb-2" style="color:#39FF14">Claude's Reasoning</p>
-                    <p class="text-[#9ca3af] text-sm leading-relaxed">{{ bet.reasoning or "No reasoning recorded." }}</p>
+                    <p class="text-[#c9d1d9] text-sm leading-relaxed">{{ bet.reasoning or "No reasoning recorded." }}</p>
                   </div>
-                  <div class="text-xs text-[#4b5563] space-y-1 min-w-[200px]">
-                    <p><span class="text-[#6b7280]">AI estimate:</span> {{ "%.0f"|format((bet.claude_home_prob or 0) * 100) }}% home win</p>
-                    <p><span class="text-[#6b7280]">Market implied:</span> {{ "%.0f"|format((bet.book_home_prob or 0) * 100) }}% home win</p>
+                  <div class="text-xs text-[#6b7280] space-y-1 min-w-[200px]">
+                    <p><span class="text-[#9ca3af]">AI estimate:</span> {{ "%.0f"|format((bet.claude_home_prob or 0) * 100) }}% home win</p>
+                    <p><span class="text-[#9ca3af]">Market implied:</span> {{ "%.0f"|format((bet.book_home_prob or 0) * 100) }}% home win</p>
                     {% if bet.score_str %}
-                    <p class="mt-2 text-[#6b7280]">Final: {{ bet.score_str }}</p>
+                    <p class="mt-2 text-[#9ca3af]">Final: {{ bet.score_str }}</p>
                     {% endif %}
                   </div>
                 </div>
@@ -275,20 +302,20 @@
 
         </div>
         <!-- Pagination -->
-        <div id="paginationContainer" class="px-5 py-3 border-t border-[#1f1f1f] flex items-center justify-between min-h-[44px]">
-          <span id="paginationInfo" class="text-xs text-[#4b5563]"></span>
+        <div id="paginationContainer" class="px-5 py-3 border-t border-[#333333] flex items-center justify-between min-h-[44px]">
+          <span id="paginationInfo" class="text-xs text-[#6b7280]"></span>
           <div id="paginationButtons" class="flex gap-1"></div>
         </div>
       </div>
     </div>
 
     <!-- ── Contact ───────────────────────────────────────────── -->
-    <div class="rounded-2xl border border-[#1f1f1f] bg-[#111111]/60 px-6 py-8 text-center">
+    <div class="rounded-2xl border border-[#333333] bg-[#111111]/60 px-6 py-8 text-center">
       <h2 class="text-base font-semibold text-white mb-1">Get in Touch</h2>
-      <p class="text-[#6b7280] text-sm mb-4">Questions, feedback, or just want to talk AI and sports? Reach out.</p>
+      <p class="text-[#9ca3af] text-sm mb-4">Questions, feedback, or just want to talk AI and sports? Reach out.</p>
       <a id="contact-link" href="#"
          class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-medium transition-colors"
-         style="background:#1a1a1a;color:#9ca3af;border:1px solid #2a2a2a"
+         style="background:#1a1a1a;color:#c9d1d9;border:1px solid #3a3a3a"
          onmouseenter="this.style.borderColor='#39FF1440';this.style.color='#39FF14'"
          onmouseleave="this.style.borderColor='#2a2a2a';this.style.color='#9ca3af'">
         <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -299,9 +326,9 @@
     </div>
 
     <!-- ── Disclaimer ─────────────────────────────────────────── -->
-    <div class="rounded-2xl border border-[#1a1a1a] bg-[#0d0d0d] px-6 py-5 text-center">
-      <p class="text-[#4b5563] text-sm leading-relaxed">
-        <span class="font-semibold text-[#6b7280]">Paper Trading Experiment.</span>
+    <div class="rounded-2xl border border-[#2a2a2a] bg-[#0d0d0d] px-6 py-5 text-center">
+      <p class="text-[#6b7280] text-sm leading-relaxed">
+        <span class="font-semibold text-[#9ca3af]">Paper Trading Experiment.</span>
         No real money is wagered. This site tracks the performance of a Claude-powered AI model for research and
         educational purposes only. This is <em>not</em> financial or betting advice.
         Past performance does not guarantee future results.

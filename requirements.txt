@@ -4,8 +4,6 @@ requests
 pandas
 numpy
 python-dotenv
-lightgbm
-scikit-learn
 pyarrow
 fastapi
 uvicorn[standard]
