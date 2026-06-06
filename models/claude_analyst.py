@@ -34,6 +34,7 @@ class ClaudeAnalyst:
         away_injuries: list | None = None,
         home_roster: str = "",
         away_roster: str = "",
+        sport: str = "basketball_nba",
     ) -> dict:
         """
         Asks Claude to analyze the game and return an adjusted home win probability.
@@ -48,7 +49,7 @@ class ClaudeAnalyst:
         """
         prompt = self._build_prompt(game, home_stats, away_stats, base_home_prob,
                                     home_injuries or [], away_injuries or [],
-                                    home_roster, away_roster)
+                                    home_roster, away_roster, sport)
 
         try:
             message = self.client.messages.create(
@@ -69,12 +70,10 @@ class ClaudeAnalyst:
 
     def _build_prompt(self, game: dict, home_stats: dict, away_stats: dict,
                       base_prob: float, home_injuries: list, away_injuries: list,
-                      home_roster: str, away_roster: str) -> str:
+                      home_roster: str, away_roster: str,
+                      sport: str = "basketball_nba") -> str:
         home = game["home_team"]
         away = game["away_team"]
-
-        home_record = f"{home_stats.get('W', '?')}-{home_stats.get('L', '?')}"
-        away_record = f"{away_stats.get('W', '?')}-{away_stats.get('L', '?')}"
 
         def _pct(val) -> str:
             try:
@@ -90,9 +89,78 @@ class ClaudeAnalyst:
                 for i in injuries
             )
 
+        def build_record(stats: dict) -> str:
+            w = stats.get("W") or stats.get("wins")
+            l = stats.get("L") or stats.get("losses")
+            otl = stats.get("otLosses") or stats.get("OTL")
+            if w is None and l is None:
+                return "?-?"
+            record = f"{int(w) if w is not None else '?'}-{int(l) if l is not None else '?'}"
+            if otl is not None:
+                record += f"-{int(otl)}"
+            return record
+
+        def _stat(stats: dict, *keys, fmt=None) -> str:
+            for k in keys:
+                v = stats.get(k)
+                if v is not None:
+                    try:
+                        f_val = float(v)
+                        if str(f_val) == "nan":
+                            continue
+                        return fmt(f_val) if fmt else str(v)
+                    except (ValueError, TypeError):
+                        return str(v)
+            return "N/A"
+
+        def build_stats_block(stats: dict) -> str:
+            if sport == "basketball_nba":
+                return "\n".join([
+                    f"- Net Rating: {_stat(stats, 'NET_RATING')}",
+                    f"- Off Rating: {_stat(stats, 'OFF_RATING')}",
+                    f"- Def Rating: {_stat(stats, 'DEF_RATING')}",
+                    f"- Pace: {_stat(stats, 'PACE')}",
+                    f"- Last 10 games: {_pct(stats.get('win_pct_l10'))} win rate",
+                    f"- Back-to-back: {'Yes' if stats.get('is_back_to_back') else 'No'}",
+                    f"- Rest days: {stats.get('rest_days', 'N/A')}",
+                ])
+            if sport == "baseball_mlb":
+                return "\n".join([
+                    f"- Win %: {_stat(stats, 'winPercent', fmt=lambda v: f'{v:.1%}')}",
+                    f"- Runs/game (for): {_stat(stats, 'pointsFor', fmt=lambda v: f'{v:.2f}')}",
+                    f"- Runs/game (against): {_stat(stats, 'pointsAgainst', fmt=lambda v: f'{v:.2f}')}",
+                    f"- Run differential: {_stat(stats, 'differential', 'pointDifferential')}",
+                    f"- Home: {_stat(stats, 'homeWins')}-{_stat(stats, 'homeLosses')}",
+                    f"- Road: {_stat(stats, 'roadWins')}-{_stat(stats, 'roadLosses')}",
+                    f"- Last 10: {_stat(stats, 'Last Ten Games')}",
+                    f"- Streak: {_stat(stats, 'streak')}",
+                ])
+            if sport == "icehockey_nhl":
+                return "\n".join([
+                    f"- Points: {_stat(stats, 'points')}",
+                    f"- Goals/game (for): {_stat(stats, 'pointsFor', fmt=lambda v: f'{v:.2f}')}",
+                    f"- Goals/game (against): {_stat(stats, 'pointsAgainst', fmt=lambda v: f'{v:.2f}')}",
+                    f"- Goal differential: {_stat(stats, 'differential', 'pointDifferential')}",
+                    f"- Last 10: {_stat(stats, 'Last Ten Games')}",
+                    f"- Streak: {_stat(stats, 'streak')}",
+                ])
+            if sport == "americanfootball_nfl":
+                return "\n".join([
+                    f"- Win %: {_stat(stats, 'winPercent', fmt=lambda v: f'{v:.1%}')}",
+                    f"- Points/game (for): {_stat(stats, 'pointsFor', fmt=lambda v: f'{v:.1f}')}",
+                    f"- Points/game (against): {_stat(stats, 'pointsAgainst', fmt=lambda v: f'{v:.1f}')}",
+                    f"- Point differential: {_stat(stats, 'differential', 'pointDifferential')}",
+                    f"- Streak: {_stat(stats, 'streak')}",
+                ])
+            return "- Stats: Not available"
+
+        home_record = build_record(home_stats)
+        away_record = build_record(away_stats)
+
         return f"""You are an expert sports betting analyst. Analyze this upcoming game and provide a win probability estimate.
 
 GAME: {away} @ {home}
+Sport: {sport}
 Commence: {game.get('commence_time', 'Unknown')}
 
 ODDS:
@@ -102,33 +170,21 @@ ODDS:
 
 HOME TEAM ({home}):
 - Record: {home_record}
-- Net Rating: {home_stats.get('NET_RATING', 'N/A')}
-- Off Rating: {home_stats.get('OFF_RATING', 'N/A')}
-- Def Rating: {home_stats.get('DEF_RATING', 'N/A')}
-- Pace: {home_stats.get('PACE', 'N/A')}
-- Last 10 games: {_pct(home_stats.get('win_pct_l10'))} win rate
-- Back-to-back: {'Yes' if home_stats.get('is_back_to_back') else 'No'}
-- Rest days: {home_stats.get('rest_days', 'N/A')}
+{build_stats_block(home_stats)}
 - Current roster: {home_roster or 'Not available'}
 - Injuries (Out/Doubtful/Questionable):
 {fmt_injuries(home_injuries)}
 
 AWAY TEAM ({away}):
 - Record: {away_record}
-- Net Rating: {away_stats.get('NET_RATING', 'N/A')}
-- Off Rating: {away_stats.get('OFF_RATING', 'N/A')}
-- Def Rating: {away_stats.get('DEF_RATING', 'N/A')}
-- Pace: {away_stats.get('PACE', 'N/A')}
-- Last 10 games: {_pct(away_stats.get('win_pct_l10'))} win rate
-- Back-to-back: {'Yes' if away_stats.get('is_back_to_back') else 'No'}
-- Rest days: {away_stats.get('rest_days', 'N/A')}
+{build_stats_block(away_stats)}
 - Current roster: {away_roster or 'Not available'}
 - Injuries (Out/Doubtful/Questionable):
 {fmt_injuries(away_injuries)}
 
 STATISTICAL MODEL ESTIMATE: {home} win probability = {base_prob:.1%}
 
-Based on this data, provide your analysis. Consider: home court advantage, rest/fatigue, recent momentum, injury impact, matchup style, and any other relevant factors you know about these teams.
+Based on this data, provide your analysis. Consider: home field advantage, rest/fatigue, recent momentum, injury impact, matchup style, and any other relevant factors you know about these teams.
 
 Respond ONLY with valid JSON in this exact format:
 {{

@@ -147,10 +147,14 @@ class ESPNStatsFetcher:
     """
 
     SPORT_MAP = {
-        "americanfootball_nfl": ("football",    "nfl"),
-        "baseball_mlb":         ("baseball",    "mlb"),
-        "icehockey_nhl":        ("hockey",      "nhl"),
+        "americanfootball_nfl": ("football", "nfl"),
+        "baseball_mlb":         ("baseball", "mlb"),
+        "icehockey_nhl":        ("hockey",   "nhl"),
     }
+
+    # site.api.espn.com returns only a redirect link for some sports;
+    # site.web.api.espn.com/apis/v2 has the full standings data
+    _STANDINGS_BASE = "https://site.web.api.espn.com/apis/v2/sports"
 
     def __init__(self):
         self.session = requests.Session()
@@ -169,15 +173,16 @@ class ESPNStatsFetcher:
             if age_hours < 6:
                 return pd.read_parquet(cache_file)
 
-        url = f"https://site.api.espn.com/apis/site/v2/sports/{league_sport}/{league}/standings"
+        url = f"{self._STANDINGS_BASE}/{league_sport}/{league}/standings"
         try:
             resp = self.session.get(url, timeout=10)
             resp.raise_for_status()
             data = resp.json()
             rows = []
-            for group in data.get("children", []):
-                for entry in group.get("standings", {}).get("entries", []):
-                    team_name = entry["team"]["displayName"]
+            # Structure: data.children (conferences/leagues) → standings.entries (teams)
+            for child in data.get("children", []):
+                for entry in child.get("standings", {}).get("entries", []):
+                    team_name = entry.get("team", {}).get("displayName", "")
                     stats = {s["name"]: s.get("value") for s in entry.get("stats", [])}
                     rows.append({"team": team_name, **stats})
             df = pd.DataFrame(rows)

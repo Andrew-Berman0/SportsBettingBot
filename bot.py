@@ -120,7 +120,8 @@ def _next_sleep_seconds(all_games_raw: list, broker: PaperBroker, now: datetime)
 
 
 def get_team_stats(sport: str, team_name: str, nba_fetcher: NBAStatsFetcher,
-                   espn_fetcher: ESPNStatsFetcher, nba_stats_df=None) -> dict:
+                   espn_fetcher: ESPNStatsFetcher, nba_stats_df=None,
+                   espn_stats_df=None) -> dict:
     if sport == "basketball_nba" and nba_stats_df is not None and not nba_stats_df.empty:
         row = nba_stats_df[nba_stats_df["TEAM_NAME"].str.contains(
             team_name.split()[-1], case=False, na=False
@@ -132,12 +133,18 @@ def get_team_stats(sport: str, team_name: str, nba_fetcher: NBAStatsFetcher,
                 form = nba_fetcher.get_recent_form(team_id)
                 stats.update(form)
             return stats
+    elif espn_stats_df is not None and not espn_stats_df.empty:
+        row = espn_stats_df[espn_stats_df["team"].str.contains(
+            team_name.split()[-1], case=False, na=False
+        )]
+        if not row.empty:
+            return row.iloc[0].to_dict()
     return {}
 
 
 def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
                   espn_fetcher: ESPNStatsFetcher, injury_fetcher: InjuryFetcher,
-                  roster_fetcher: RosterFetcher, nba_stats_df,
+                  roster_fetcher: RosterFetcher, nba_stats_df, espn_stats_df,
                   engineer: FeatureEngineer, claude: ClaudeAnalyst,
                   broker: PaperBroker, lgbm: LGBMPredictor | None = None) -> None:
     """Run the full analysis pipeline for a single game and place a bet if value found."""
@@ -178,18 +185,17 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     home_team = game["home_team"]
     away_team = game["away_team"]
 
-    home_stats = get_team_stats(sport, home_team, nba_fetcher, espn_fetcher, nba_stats_df)
-    away_stats = get_team_stats(sport, away_team, nba_fetcher, espn_fetcher, nba_stats_df)
+    home_stats = get_team_stats(sport, home_team, nba_fetcher, espn_fetcher,
+                                nba_stats_df, espn_stats_df)
+    away_stats = get_team_stats(sport, away_team, nba_fetcher, espn_fetcher,
+                                nba_stats_df, espn_stats_df)
 
-    home_injuries, away_injuries = [], []
-    home_roster, away_roster = "", ""
-    if sport == "basketball_nba":
-        home_injuries = injury_fetcher.get_team_injuries(home_team, max_age_minutes=30)
-        away_injuries = injury_fetcher.get_team_injuries(away_team, max_age_minutes=30)
-        home_roster   = roster_fetcher.get_roster_string(home_team)
-        away_roster   = roster_fetcher.get_roster_string(away_team)
-        if home_injuries or away_injuries:
-            logger.info(f"  Injuries — {home_team}: {len(home_injuries)} | {away_team}: {len(away_injuries)}")
+    home_injuries = injury_fetcher.get_team_injuries(home_team, sport=sport, max_age_minutes=30)
+    away_injuries = injury_fetcher.get_team_injuries(away_team, sport=sport, max_age_minutes=30)
+    home_roster   = roster_fetcher.get_roster_string(home_team, sport=sport)
+    away_roster   = roster_fetcher.get_roster_string(away_team, sport=sport)
+    if home_injuries or away_injuries:
+        logger.info(f"  Injuries — {home_team}: {len(home_injuries)} | {away_team}: {len(away_injuries)}")
 
     features = engineer.build_game_features(game, home_stats, away_stats)
 
@@ -209,7 +215,8 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     logger.info(f"Analyzing: {away_team} @ {home_team} ({hours_until:.1f}h away)")
     analysis = claude.analyze_game(game, home_stats, away_stats, base_home_prob,
                                    home_injuries=home_injuries, away_injuries=away_injuries,
-                                   home_roster=home_roster, away_roster=away_roster)
+                                   home_roster=home_roster, away_roster=away_roster,
+                                   sport=sport)
 
     our_home_prob = analysis["adjusted_home_prob"]
     our_away_prob = 1 - our_home_prob
@@ -307,14 +314,17 @@ def run_loop():
             total_games = len(all_games_raw)
             logger.info(f"Upcoming games across all sports: {total_games}")
 
-            # 3. Fetch NBA stats only if an NBA game is in the analysis window
+            # 3. Pre-fetch stats for any sport with a game in the analysis window
             nba_stats_df = None
+            espn_stats_cache: dict = {}
             for sport, g in all_games_raw:
-                if sport == "basketball_nba":
-                    h = _hours_until(g)
-                    if h is not None and 0.5 <= h <= 2.5:
-                        nba_stats_df = nba_fetcher.get_team_stats()
-                        break
+                h = _hours_until(g)
+                if h is None or not (0.5 <= h <= 2.5):
+                    continue
+                if sport == "basketball_nba" and nba_stats_df is None:
+                    nba_stats_df = nba_fetcher.get_team_stats()
+                elif sport != "basketball_nba" and sport not in espn_stats_cache:
+                    espn_stats_cache[sport] = espn_fetcher.get_team_stats(sport)
 
             # 4. Evaluate games in analysis window
             for sport, game_raw in all_games_raw:
@@ -322,6 +332,7 @@ def run_loop():
                     game_raw, sport, nba_fetcher, espn_fetcher,
                     injury_fetcher, roster_fetcher,
                     nba_stats_df if sport == "basketball_nba" else None,
+                    espn_stats_cache.get(sport),
                     engineer, claude, broker, lgbm,
                 )
 
