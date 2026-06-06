@@ -21,6 +21,7 @@ SIGNIFICANT_STATUSES = {"Out", "Doubtful", "Questionable", "Day-To-Day"}
 
 SPORT_ESPN_MAP = {
     "basketball_nba":       ("basketball", "nba"),
+    "basketball_wnba":      ("basketball", "wnba"),
     "americanfootball_nfl": ("football",   "nfl"),
     "baseball_mlb":         ("baseball",   "mlb"),
     "icehockey_nhl":        ("hockey",     "nhl"),

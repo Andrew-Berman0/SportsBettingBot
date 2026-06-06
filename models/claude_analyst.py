@@ -144,6 +144,17 @@ class ClaudeAnalyst:
                     f"- Last 10: {_stat(stats, 'Last Ten Games')}",
                     f"- Streak: {_stat(stats, 'streak')}",
                 ])
+            if sport == "basketball_wnba":
+                return "\n".join([
+                    f"- Win %: {_stat(stats, 'winPercent', fmt=lambda v: f'{v:.1%}')}",
+                    f"- Points/game (for): {_stat(stats, 'avgPointsFor', 'pointsFor', fmt=lambda v: f'{v:.1f}')}",
+                    f"- Points/game (against): {_stat(stats, 'avgPointsAgainst', 'pointsAgainst', fmt=lambda v: f'{v:.1f}')}",
+                    f"- Point differential: {_stat(stats, 'differential', 'pointDifferential')}",
+                    f"- Home: {_stat(stats, 'Home')}",
+                    f"- Road: {_stat(stats, 'Road')}",
+                    f"- Last 10: {_stat(stats, 'Last Ten Games')}",
+                    f"- Streak: {_stat(stats, 'streak')}",
+                ])
             if sport == "americanfootball_nfl":
                 return "\n".join([
                     f"- Win %: {_stat(stats, 'winPercent', fmt=lambda v: f'{v:.1%}')}",

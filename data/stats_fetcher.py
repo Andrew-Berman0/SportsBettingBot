@@ -147,9 +147,10 @@ class ESPNStatsFetcher:
     """
 
     SPORT_MAP = {
-        "americanfootball_nfl": ("football", "nfl"),
-        "baseball_mlb":         ("baseball", "mlb"),
-        "icehockey_nhl":        ("hockey",   "nhl"),
+        "basketball_wnba":      ("basketball", "wnba"),
+        "americanfootball_nfl": ("football",   "nfl"),
+        "baseball_mlb":         ("baseball",   "mlb"),
+        "icehockey_nhl":        ("hockey",     "nhl"),
     }
 
     # site.api.espn.com returns only a redirect link for some sports;

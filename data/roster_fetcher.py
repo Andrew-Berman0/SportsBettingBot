@@ -19,6 +19,7 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 SPORT_ESPN_MAP = {
     "basketball_nba":       ("basketball", "nba"),
+    "basketball_wnba":      ("basketball", "wnba"),
     "americanfootball_nfl": ("football",   "nfl"),
     "baseball_mlb":         ("baseball",   "mlb"),
     "icehockey_nhl":        ("hockey",     "nhl"),
@@ -27,6 +28,7 @@ SPORT_ESPN_MAP = {
 # Priority positions shown per sport (keeps prompt concise for large rosters)
 POSITION_PRIORITY = {
     "basketball_nba":       ["PG", "SG", "G", "SF", "PF", "F", "C"],
+    "basketball_wnba":      ["PG", "SG", "G", "SF", "PF", "F", "C"],
     "americanfootball_nfl": ["QB", "RB", "WR", "TE", "K", "P"],
     "baseball_mlb":         ["SP", "RP", "CP", "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"],
     "icehockey_nhl":        ["C", "LW", "RW", "D", "G"],
@@ -134,8 +136,8 @@ class RosterFetcher:
     def _parse_athletes(athletes_data) -> list[dict]:
         """
         Handles ESPN's two roster response shapes:
-          - NBA: flat list of player dicts
-          - MLB/NFL/NHL: list of position-group dicts, each with a nested "athletes" list
+          - NBA: flat list of player dicts  (key: "displayName" at top level)
+          - MLB/NFL/NHL: position-group dicts with a nested "items" list of player dicts
         """
         players = []
         if not isinstance(athletes_data, list):
@@ -143,9 +145,9 @@ class RosterFetcher:
         for a in athletes_data:
             if not isinstance(a, dict):
                 continue
-            if "athletes" in a:
+            if "items" in a:
                 # Position-group format (MLB/NFL/NHL)
-                for item in a.get("athletes", []):
+                for item in a.get("items", []):
                     if not isinstance(item, dict):
                         continue
                     pos = item.get("position", {})
@@ -163,7 +165,7 @@ class RosterFetcher:
         return players
 
     def _resolve_abbr(self, team_name: str, sport: str) -> str | None:
-        if sport == "basketball_nba":
+        if sport in ("basketball_nba",):
             if team_name in NBA_TEAM_ABBR:
                 return NBA_TEAM_ABBR[team_name]
             name_lower = team_name.lower()

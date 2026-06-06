@@ -1,19 +1,26 @@
 """
 data/results_fetcher.py
 -----------------------
-Fetches completed NBA game scores from ESPN's unofficial scoreboard API.
+Fetches completed game scores from ESPN's unofficial scoreboard API.
 Used to auto-settle open bets and label training data.
 No API key required.
 """
 
 import logging
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 import requests
 
 logger = logging.getLogger(__name__)
 
-ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
+SPORT_ESPN_MAP = {
+    "basketball_nba":       ("basketball", "nba"),
+    "basketball_wnba":      ("basketball", "wnba"),
+    "baseball_mlb":         ("baseball",   "mlb"),
+    "icehockey_nhl":        ("hockey",     "nhl"),
+    "americanfootball_nfl": ("football",   "nfl"),
+}
 
 
 class ResultsFetcher:
@@ -22,23 +29,23 @@ class ResultsFetcher:
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "Mozilla/5.0"})
 
-    def get_completed_games(self, days_back: int = 2) -> list[dict]:
+    def get_completed_games(self, days_back: int = 2,
+                            sport: str = "basketball_nba") -> list[dict]:
         """
-        Returns a list of completed games from the past `days_back` days.
-        Each entry:
-            {
-                "home_team": str,
-                "away_team": str,
-                "home_score": int,
-                "away_score": int,
-                "date": str,   # YYYY-MM-DD
-            }
+        Returns completed games from the past `days_back` days for the given sport.
+        Each entry: {home_team, away_team, home_score, away_score, date}
         """
+        if sport not in SPORT_ESPN_MAP:
+            return []
+
+        league_sport, league = SPORT_ESPN_MAP[sport]
+        url = f"https://site.api.espn.com/apis/site/v2/sports/{league_sport}/{league}/scoreboard"
+
         results = []
         for days_ago in range(days_back + 1):
             date = (datetime.now(timezone.utc) - timedelta(days=days_ago)).strftime("%Y%m%d")
             try:
-                resp = self.session.get(ESPN_URL, params={"dates": date}, timeout=10)
+                resp = self.session.get(url, params={"dates": date}, timeout=10)
                 resp.raise_for_status()
                 for event in resp.json().get("events", []):
                     comp = event.get("competitions", [{}])[0]
@@ -63,73 +70,84 @@ class ResultsFetcher:
                             "date":       date[:4] + "-" + date[4:6] + "-" + date[6:],
                         })
             except Exception as e:
-                logger.warning(f"ResultsFetcher error for {date}: {e}")
+                logger.warning(f"ResultsFetcher error for {sport} {date}: {e}")
         return results
 
     def settle_open_bets(self, broker) -> int:
         """
         Checks ESPN for completed games, settles any matching open bets.
+        Handles all sports that have open bets.
         Returns the number of bets settled.
         """
         if not broker.open_bets:
             return 0
 
-        # Look back far enough to cover the oldest open bet (capped at 30 days)
         now = datetime.now(timezone.utc)
-        days_back = 3
-        for b in broker.open_bets:
-            ct = b.get("commence_time")
-            if ct:
-                try:
-                    start = datetime.fromisoformat(ct.replace("Z", "+00:00"))
-                    days_old = (now - start).days + 1
-                    days_back = max(days_back, days_old)
-                except Exception:
-                    pass
-        days_back = min(days_back, 30)
 
-        completed = self.get_completed_games(days_back=days_back)
-        if not completed:
-            return 0
+        # Group open bets by sport so we fetch each sport's scoreboard once
+        bets_by_sport: dict[str, list] = defaultdict(list)
+        for bet in broker.open_bets:
+            bets_by_sport[bet.get("sport", "basketball_nba")].append(bet)
 
         settled_count = 0
-        for result in completed:
-            matching_bets = [
-                b for b in broker.open_bets
-                if self._teams_match(b["home_team"], result["home_team"])
-                and self._teams_match(b["away_team"], result["away_team"])
-                and self._game_has_started(b.get("commence_time"), now)
-                and self._result_date_matches(result["date"], b.get("commence_time"))
-            ]
-            if not matching_bets:
+
+        for sport, sport_bets in bets_by_sport.items():
+            if sport not in SPORT_ESPN_MAP:
+                logger.debug(f"No ESPN scoreboard configured for sport '{sport}' — skipping settlement")
                 continue
 
-            game_id = matching_bets[0]["game_id"]
-            logger.info(
-                f"Settling {result['away_team']} @ {result['home_team']} "
-                f"({result['away_score']}-{result['home_score']})"
-            )
-            settled = broker.settle_bet(
-                game_id=game_id,
-                home_score=result["home_score"],
-                away_score=result["away_score"],
-            )
-            settled_count += len(settled)
+            # Dynamic lookback from oldest open bet for this sport
+            days_back = 3
+            for b in sport_bets:
+                ct = b.get("commence_time")
+                if ct:
+                    try:
+                        start = datetime.fromisoformat(ct.replace("Z", "+00:00"))
+                        days_old = (now - start).days + 1
+                        days_back = max(days_back, days_old)
+                    except Exception:
+                        pass
+            days_back = min(days_back, 30)
+
+            completed = self.get_completed_games(days_back=days_back, sport=sport)
+            if not completed:
+                continue
+
+            for result in completed:
+                matching = [
+                    b for b in sport_bets
+                    if self._teams_match(b["home_team"], result["home_team"])
+                    and self._teams_match(b["away_team"], result["away_team"])
+                    and self._game_has_started(b.get("commence_time"), now)
+                    and self._result_date_matches(result["date"], b.get("commence_time"))
+                ]
+                if not matching:
+                    continue
+
+                game_id = matching[0]["game_id"]
+                logger.info(
+                    f"Settling {result['away_team']} @ {result['home_team']} "
+                    f"({result['away_score']}-{result['home_score']}) [{sport}]"
+                )
+                settled = broker.settle_bet(
+                    game_id=game_id,
+                    home_score=result["home_score"],
+                    away_score=result["away_score"],
+                )
+                settled_count += len(settled)
 
         return settled_count
 
     @staticmethod
     def _teams_match(bet_name: str, espn_name: str) -> bool:
-        """Fuzzy match on the team nickname (last word)."""
         b = bet_name.lower().split()[-1]
         e = espn_name.lower().split()[-1]
         return b == e
 
     @staticmethod
     def _game_has_started(commence_time: str | None, now: datetime) -> bool:
-        """Returns True if commence_time is in the past (game has started or finished)."""
         if not commence_time:
-            return True  # no timestamp stored — assume it's a legacy bet, allow settlement
+            return True
         try:
             start = datetime.fromisoformat(commence_time.replace("Z", "+00:00"))
             return start <= now
