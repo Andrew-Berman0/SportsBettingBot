@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WWAID — What Would AI Do?</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'sans-serif'] }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    .sport-nba  { background: #7c3aed22; color: #a78bfa; border-color: #7c3aed44; }
+    .sport-wnba { background: #ea580c22; color: #fb923c; border-color: #ea580c44; }
+    .sport-mlb  { background: #1d4ed822; color: #60a5fa; border-color: #1d4ed844; }
+    .sport-nhl  { background: #0e7490aa; color: #67e8f9; border-color: #06b6d444; }
+    .sport-nfl  { background: #15803d22; color: #4ade80; border-color: #15803d44; }
+    .sport-pill { font-size: 0.65rem; font-weight: 600; letter-spacing: 0.06em;
+                  padding: 2px 8px; border-radius: 999px; border: 1px solid; }
+    .reasoning-row { display: none; }
+    .reasoning-row.open { display: table-row; }
+    tr.bet-row:hover { cursor: pointer; }
+  </style>
+</head>
+
+<body class="bg-slate-900 text-slate-100 min-h-screen">
+
+  <!-- ── Header ─────────────────────────────────────────────── -->
+  <header class="border-b border-slate-800">
+    <div class="max-w-7xl mx-auto px-6 py-5 flex items-end justify-between">
+      <div>
+        <div class="flex items-center gap-3">
+          <span class="text-3xl font-extrabold tracking-tight text-white">WWAID</span>
+          <span class="text-xs font-semibold px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30">
+            PAPER TRADING
+          </span>
+        </div>
+        <p class="text-slate-400 text-sm mt-0.5">What Would AI Do? — an AI sports betting experiment</p>
+      </div>
+      <p class="text-xs text-slate-600 pb-1">Updated {{ last_updated }}</p>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-6 py-8 space-y-8">
+
+    <!-- ── Hero stats ─────────────────────────────────────────── -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+
+      <div class="bg-slate-800 rounded-2xl p-5 border border-slate-700/50">
+        <p class="text-slate-400 text-xs font-medium uppercase tracking-wider mb-1">Bankroll</p>
+        <p class="text-3xl font-bold text-white">${{ "%.2f"|format(stats.bankroll) }}</p>
+        <p class="text-xs text-slate-500 mt-1">Started $10,000.00</p>
+      </div>
+
+      <div class="bg-slate-800 rounded-2xl p-5 border border-slate-700/50">
+        <p class="text-slate-400 text-xs font-medium uppercase tracking-wider mb-1">All-time P&amp;L</p>
+        <p class="text-3xl font-bold {{ 'text-emerald-400' if stats.total_pnl >= 0 else 'text-red-400' }}">
+          {{ '+' if stats.total_pnl >= 0 else '' }}${{ "%.2f"|format(stats.total_pnl) }}
+        </p>
+        <p class="text-xs text-slate-500 mt-1">ROI: {{ '+' if stats.roi >= 0 else '' }}{{ "%.1f"|format(stats.roi) }}%</p>
+      </div>
+
+      <div class="bg-slate-800 rounded-2xl p-5 border border-slate-700/50">
+        <p class="text-slate-400 text-xs font-medium uppercase tracking-wider mb-1">Record</p>
+        <p class="text-3xl font-bold text-white">{{ stats.wins }}–{{ stats.losses }}</p>
+        <p class="text-xs text-slate-500 mt-1">{{ "%.0f"|format(stats.win_rate) }}% win rate</p>
+      </div>
+
+      <div class="bg-slate-800 rounded-2xl p-5 border border-slate-700/50">
+        <p class="text-slate-400 text-xs font-medium uppercase tracking-wider mb-1">Total Bets</p>
+        <p class="text-3xl font-bold text-white">{{ stats.total_bets }}</p>
+        <p class="text-xs text-slate-500 mt-1">
+          {% for sport, s in sport_stats.items() %}
+            {{ sport }} {{ s.wins }}–{{ s.losses }}{% if not loop.last %} · {% endif %}
+          {% endfor %}
+        </p>
+      </div>
+
+    </div>
+
+    <!-- ── Charts ─────────────────────────────────────────────── -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+      <div class="bg-slate-800 rounded-2xl p-6 border border-slate-700/50">
+        <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider mb-4">Bankroll Over Time</h2>
+        <canvas id="bankrollChart"></canvas>
+      </div>
+
+      <div class="bg-slate-800 rounded-2xl p-6 border border-slate-700/50">
+        <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider mb-4">P&amp;L Per Bet</h2>
+        <canvas id="pnlChart"></canvas>
+      </div>
+
+    </div>
+
+    <!-- ── Live open bets ──────────────────────────────────────── -->
+    {% if open_bets %}
+    <div>
+      <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider mb-3 flex items-center gap-2">
+        Live Bets
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse inline-block"></span>
+      </h2>
+      <div class="bg-slate-800 rounded-2xl border border-slate-700/50 overflow-hidden">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-slate-700 text-xs text-slate-400 uppercase tracking-wider">
+              <th class="px-5 py-3 text-left font-medium">Sport</th>
+              <th class="px-5 py-3 text-left font-medium">Matchup</th>
+              <th class="px-5 py-3 text-left font-medium">Bet</th>
+              <th class="px-5 py-3 text-left font-medium">Odds</th>
+              <th class="px-5 py-3 text-left font-medium">Stake</th>
+              <th class="px-5 py-3 text-left font-medium">To Win</th>
+              <th class="px-5 py-3 text-left font-medium">Placed</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for bet in open_bets %}
+            <tr class="border-b border-slate-700/40">
+              <td class="px-5 py-3">
+                <span class="sport-pill sport-{{ bet.sport_label | lower }}">{{ bet.sport_label }}</span>
+              </td>
+              <td class="px-5 py-3 font-medium text-white">{{ bet.matchup }}</td>
+              <td class="px-5 py-3 text-slate-300">{{ bet.bet_label }} · <span class="text-white">{{ bet.bet_team }}</span></td>
+              <td class="px-5 py-3 font-mono text-slate-200">{{ bet.odds_str }}</td>
+              <td class="px-5 py-3 text-slate-300">{{ bet.stake_str }}</td>
+              <td class="px-5 py-3 text-emerald-400 font-medium">${{ "%.2f"|format(bet.to_win) }}</td>
+              <td class="px-5 py-3 text-slate-500 text-xs">{{ bet.placed_date }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- ── Picks log ───────────────────────────────────────────── -->
+    <div>
+      <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider mb-3">
+        Picks Log <span class="text-slate-600 normal-case font-normal text-xs ml-1">(click any row to see Claude's reasoning)</span>
+      </h2>
+      <div class="bg-slate-800 rounded-2xl border border-slate-700/50 overflow-hidden">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-slate-700 text-xs text-slate-400 uppercase tracking-wider">
+              <th class="px-5 py-3 text-left font-medium">Date</th>
+              <th class="px-5 py-3 text-left font-medium">Sport</th>
+              <th class="px-5 py-3 text-left font-medium">Matchup</th>
+              <th class="px-5 py-3 text-left font-medium">Bet</th>
+              <th class="px-5 py-3 text-left font-medium">Odds</th>
+              <th class="px-5 py-3 text-left font-medium">Stake</th>
+              <th class="px-5 py-3 text-left font-medium">Result</th>
+              <th class="px-5 py-3 text-left font-medium">P&amp;L</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for bet in closed_bets %}
+
+            <tr class="bet-row border-b border-slate-700/40 hover:bg-slate-700/30 transition-colors"
+                onclick="toggleRow('r-{{ loop.index }}')">
+              <td class="px-5 py-3 text-slate-400 text-xs">{{ bet.settled_date }}</td>
+              <td class="px-5 py-3">
+                <span class="sport-pill sport-{{ bet.sport_label | lower }}">{{ bet.sport_label }}</span>
+              </td>
+              <td class="px-5 py-3 font-medium text-white">{{ bet.matchup }}</td>
+              <td class="px-5 py-3 text-slate-300 text-xs">{{ bet.bet_label }} · <span class="text-white">{{ bet.bet_team }}</span></td>
+              <td class="px-5 py-3 font-mono text-slate-200 text-xs">{{ bet.odds_str }}</td>
+              <td class="px-5 py-3 text-slate-300 text-xs">{{ bet.stake_str }}</td>
+              <td class="px-5 py-3">
+                <span class="text-xs font-semibold px-2 py-0.5 rounded {{ 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' if bet.won else 'bg-red-500/20 text-red-400 border border-red-500/30' }}">
+                  {{ 'WIN' if bet.won else 'LOSS' }}
+                </span>
+              </td>
+              <td class="px-5 py-3 font-medium text-sm {{ 'text-emerald-400' if bet.won else 'text-red-400' }}">
+                {{ bet.pnl_str }}
+              </td>
+            </tr>
+
+            <tr id="r-{{ loop.index }}" class="reasoning-row border-b border-slate-700/40 bg-slate-900/60">
+              <td colspan="8" class="px-6 py-5">
+                <div class="flex gap-6">
+                  <div class="flex-1">
+                    <p class="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-2">Claude's Reasoning</p>
+                    <p class="text-slate-300 text-sm leading-relaxed">{{ bet.reasoning or "No reasoning recorded." }}</p>
+                  </div>
+                  <div class="text-xs text-slate-500 space-y-1 min-w-[200px]">
+                    <p><span class="text-slate-400">AI estimate:</span> {{ "%.0f"|format(bet.claude_home_prob * 100) }}% home win</p>
+                    <p><span class="text-slate-400">Market implied:</span> {{ "%.0f"|format(bet.book_home_prob * 100) }}% home win</p>
+                    {% if bet.score_str %}
+                    <p class="mt-2 text-slate-400">Final: {{ bet.score_str }}</p>
+                    {% endif %}
+                  </div>
+                </div>
+              </td>
+            </tr>
+
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── Disclaimer ─────────────────────────────────────────── -->
+    <div class="rounded-2xl border border-slate-700/50 bg-slate-800/40 px-6 py-5 text-center">
+      <p class="text-slate-400 text-sm leading-relaxed">
+        <span class="font-semibold text-slate-300">Paper Trading Experiment.</span>
+        No real money is wagered. This site tracks the performance of a Claude-powered AI model for research and
+        educational purposes only. This is <em>not</em> financial or betting advice.
+        Past performance does not guarantee future results.
+      </p>
+    </div>
+
+  </main>
+
+  <!-- ── Charts JS ──────────────────────────────────────────────── -->
+  <script>
+    const bankrollLabels = {{ bankroll_labels | safe }};
+    const bankrollValues = {{ bankroll_values | safe }};
+    const pnlLabels      = {{ pnl_labels | safe }};
+    const pnlValues      = {{ pnl_values | safe }};
+    const pnlColors      = {{ pnl_colors | safe }};
+
+    Chart.defaults.color = '#94a3b8';
+    Chart.defaults.borderColor = '#334155';
+
+    // Bankroll line chart
+    new Chart(document.getElementById('bankrollChart'), {
+      type: 'line',
+      data: {
+        labels: bankrollLabels,
+        datasets: [{
+          label: 'Bankroll',
+          data: bankrollValues,
+          borderColor: '#10b981',
+          backgroundColor: 'rgba(16,185,129,0.08)',
+          borderWidth: 2,
+          pointRadius: 3,
+          pointBackgroundColor: '#10b981',
+          fill: true,
+          tension: 0.3,
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { color: '#1e293b' }, ticks: { maxTicksLimit: 8 } },
+          y: {
+            grid: { color: '#1e293b' },
+            ticks: { callback: v => '$' + v.toLocaleString() }
+          }
+        }
+      }
+    });
+
+    // P&L bar chart
+    new Chart(document.getElementById('pnlChart'), {
+      type: 'bar',
+      data: {
+        labels: pnlLabels,
+        datasets: [{
+          label: 'P&L',
+          data: pnlValues,
+          backgroundColor: pnlColors,
+          borderRadius: 4,
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { display: false },
+          y: {
+            grid: { color: '#1e293b' },
+            ticks: { callback: v => (v >= 0 ? '+$' : '-$') + Math.abs(v) }
+          }
+        }
+      }
+    });
+
+    // Row expand/collapse
+    function toggleRow(id) {
+      const row = document.getElementById(id);
+      row.classList.toggle('open');
+    }
+  </script>
+
+</body>
+</html>
