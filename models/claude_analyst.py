@@ -36,6 +36,7 @@ class ClaudeAnalyst:
         away_roster: str = "",
         sport: str = "basketball_nba",
         series_context: str | None = None,
+        starting_pitchers: dict | None = None,
     ) -> dict:
         """
         Asks Claude to analyze the game and return an adjusted home win probability.
@@ -50,7 +51,8 @@ class ClaudeAnalyst:
         """
         prompt = self._build_prompt(game, home_stats, away_stats, base_home_prob,
                                     home_injuries or [], away_injuries or [],
-                                    home_roster, away_roster, sport, series_context)
+                                    home_roster, away_roster, sport, series_context,
+                                    starting_pitchers or {})
 
         try:
             message = self.client.messages.create(
@@ -73,7 +75,8 @@ class ClaudeAnalyst:
                       base_prob: float, home_injuries: list, away_injuries: list,
                       home_roster: str, away_roster: str,
                       sport: str = "basketball_nba",
-                      series_context: str | None = None) -> str:
+                      series_context: str | None = None,
+                      starting_pitchers: dict | None = None) -> str:
         home = game["home_team"]
         away = game["away_team"]
 
@@ -115,7 +118,7 @@ class ClaudeAnalyst:
                         return str(v)
             return "N/A"
 
-        def build_stats_block(stats: dict) -> str:
+        def build_stats_block(stats: dict, side: str = "") -> str:
             if sport == "basketball_nba":
                 return "\n".join([
                     f"- Net Rating: {_stat(stats, 'NET_RATING')}",
@@ -127,7 +130,17 @@ class ClaudeAnalyst:
                     f"- Rest days: {stats.get('rest_days', 'N/A')}",
                 ])
             if sport == "baseball_mlb":
+                sp = starting_pitchers or {}
+                pitcher = sp.get(side, {})
+                pitcher_line = (
+                    f"- Starting pitcher: {pitcher['name']} "
+                    f"({pitcher.get('wins','?')}-{pitcher.get('losses','?')}, "
+                    f"{pitcher.get('era','?')} ERA)"
+                    if pitcher.get("name") and pitcher["name"] != "TBD"
+                    else "- Starting pitcher: TBD"
+                )
                 return "\n".join([
+                    pitcher_line,
                     f"- Win %: {_stat(stats, 'winPercent', fmt=lambda v: f'{v:.1%}')}",
                     f"- Runs/game (for): {_stat(stats, 'pointsFor', fmt=lambda v: f'{v:.2f}')}",
                     f"- Runs/game (against): {_stat(stats, 'pointsAgainst', fmt=lambda v: f'{v:.2f}')}",
@@ -200,14 +213,14 @@ ODDS:
 {series_block}
 HOME TEAM ({home}):
 - Record: {home_record}
-{build_stats_block(home_stats)}
+{build_stats_block(home_stats, "home")}
 - Current roster: {home_roster or 'Not available'}
 - Injuries (Out/Doubtful/Questionable):
 {fmt_injuries(home_injuries)}
 
 AWAY TEAM ({away}):
 - Record: {away_record}
-{build_stats_block(away_stats)}
+{build_stats_block(away_stats, "away")}
 - Current roster: {away_roster or 'Not available'}
 - Injuries (Out/Doubtful/Questionable):
 {fmt_injuries(away_injuries)}

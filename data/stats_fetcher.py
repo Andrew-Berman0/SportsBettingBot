@@ -270,3 +270,56 @@ class ESPNStatsFetcher:
         if result:
             logger.info(f"Series context for {away_team} @ {home_team}: {result}")
         return result
+
+    def get_starting_pitchers(self, home_team: str, away_team: str) -> dict:
+        """
+        Returns probable starting pitchers for an MLB game from the ESPN scoreboard.
+        Checks today and tomorrow. Result: {"home": {...}, "away": {...}} or {}.
+        Each side: {"name": str, "record": str, "era": str}
+        """
+        from datetime import date, timedelta
+        home_nick = home_team.split()[-1].lower()
+        away_nick = away_team.split()[-1].lower()
+
+        for delta in range(2):
+            d = date.today() + timedelta(days=delta)
+            url = (f"{self._SCOREBOARD_BASE}/baseball/mlb/scoreboard"
+                   f"?dates={d.strftime('%Y%m%d')}")
+            try:
+                resp = self.session.get(url, timeout=10)
+                resp.raise_for_status()
+                for event in resp.json().get("events", []):
+                    for comp in event.get("competitions", []):
+                        competitors = comp.get("competitors", [])
+                        home_c = next((c for c in competitors if c.get("homeAway") == "home"), None)
+                        away_c = next((c for c in competitors if c.get("homeAway") == "away"), None)
+                        if not home_c or not away_c:
+                            continue
+                        h_name = home_c.get("team", {}).get("displayName", "").lower()
+                        a_name = away_c.get("team", {}).get("displayName", "").lower()
+                        if home_nick in h_name and away_nick in a_name:
+                            result = {}
+                            for side, comp_ in (("home", home_c), ("away", away_c)):
+                                probs = comp_.get("probables", [])
+                                if probs:
+                                    p = probs[0]
+                                    stats = {s["abbreviation"]: s["displayValue"]
+                                             for s in p.get("statistics", [])}
+                                    result[side] = {
+                                        "name":   p.get("athlete", {}).get("fullName", "TBD"),
+                                        "record": p.get("record", ""),
+                                        "era":    stats.get("ERA", "?"),
+                                        "wins":   stats.get("W", "?"),
+                                        "losses": stats.get("L", "?"),
+                                    }
+                                else:
+                                    result[side] = {"name": "TBD", "record": "", "era": "?"}
+                            if result:
+                                logger.info(
+                                    f"Starters: {away_team} ({result.get('away',{}).get('name','?')}) "
+                                    f"@ {home_team} ({result.get('home',{}).get('name','?')})"
+                                )
+                                return result
+            except Exception as e:
+                logger.debug(f"Starting pitcher fetch error: {e}")
+        return {}

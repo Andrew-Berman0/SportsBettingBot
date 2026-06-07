@@ -209,11 +209,17 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     if sport in ("basketball_nba", "icehockey_nhl"):
         series_context = espn_fetcher.get_series_context(sport, home_team, away_team)
 
+    # Fetch probable starting pitchers for MLB — biggest single factor in game outcome
+    starting_pitchers = {}
+    if sport == "baseball_mlb":
+        starting_pitchers = espn_fetcher.get_starting_pitchers(home_team, away_team)
+
     logger.info(f"Analyzing: {away_team} @ {home_team} ({hours_until:.1f}h away)")
     analysis = claude.analyze_game(game, home_stats, away_stats, base_home_prob,
                                    home_injuries=home_injuries, away_injuries=away_injuries,
                                    home_roster=home_roster, away_roster=away_roster,
-                                   sport=sport, series_context=series_context)
+                                   sport=sport, series_context=series_context,
+                                   starting_pitchers=starting_pitchers)
 
     our_home_prob = analysis["adjusted_home_prob"]
     our_away_prob = 1 - our_home_prob
