@@ -1,10 +1,10 @@
 """
 data/odds_fetcher.py
 --------------------
-Fetches live and upcoming odds from The Odds API.
-Free tier: 500 requests/month. We cache aggressively to stay within limits.
+Fetches upcoming odds from TheRundown API.
+Free tier: 20,000 requests/day.
 
-Get a free key at: https://the-odds-api.com
+Get a free key at: https://therundown.io
 """
 
 import json
@@ -17,21 +17,19 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-# Imported lazily to avoid circular imports
-_action_network_fetcher = None
-
-
-def _get_action_network():
-    global _action_network_fetcher
-    if _action_network_fetcher is None:
-        from SportsBettingBot.data.action_network_fetcher import ActionNetworkFetcher
-        _action_network_fetcher = ActionNetworkFetcher()
-    return _action_network_fetcher
-
 CACHE_DIR = Path(__file__).parent.parent / "data" / "raw"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-BASE_URL = "https://api.the-odds-api.com/v4"
+BASE_URL = "https://therundown.io/api/v1"
+
+# Regular season + playoff IDs per sport (TheRundown splits them unlike The Odds API)
+SPORT_IDS = {
+    "basketball_nba":       [4, 24],   # NBA regular season + NBA Playoffs
+    "basketball_wnba":      [8],
+    "americanfootball_nfl": [2, 26],   # NFL regular season + NFL Playoffs
+    "baseball_mlb":         [3, 31],   # MLB regular season + MLB Playoffs
+    "icehockey_nhl":        [6, 28],   # NHL regular season + NHL Playoffs
+}
 
 
 class OddsFetcher:
@@ -39,18 +37,18 @@ class OddsFetcher:
     def __init__(self, api_key: str):
         self.api_key = api_key
         self.session = requests.Session()
+        self._auth_params = {"key": self.api_key}
 
     def get_upcoming_games(self, sport: str, bookmakers: list[str]) -> list[dict]:
         """
-        Returns upcoming games with odds for a given sport.
-        sport examples: 'basketball_nba', 'americanfootball_nfl', 'baseball_mlb', 'icehockey_nhl'
+        Returns upcoming pre-parsed game dicts for a given sport.
+        `bookmakers` param kept for interface compatibility but not used —
+        TheRundown returns all available lines in one call.
 
-        Cache strategy (saves API quota):
-          - Cache < 90 min old  → always use it, no API call
-          - Cache 90 min–6 hrs  → peek at cached commence_times; only call if a game
-                                   is within 4 hours (odds are moving) or no game data exists
-          - Cache > 6 hrs old   → always refresh (pick up newly scheduled games)
-          - No cache            → always call
+        Cache strategy:
+          - Cache < 90 min old  → always use it
+          - Cache 90 min–6 hrs  → only refresh if a game is within 4h
+          - Cache > 6 hrs old   → always refresh
         """
         cache_file = CACHE_DIR / f"odds_{sport}.json"
         now = datetime.now(timezone.utc)
@@ -68,47 +66,114 @@ class OddsFetcher:
                     cached = json.load(f)
                 if not self._game_approaching(cached, now, hours=4):
                     logger.info(
-                        f"Odds cache ({age_minutes:.0f}min old), no game within 4h — skipping API call for {sport}"
+                        f"Odds cache ({age_minutes:.0f}min old), no game within 4h"
+                        f" — skipping API call for {sport}"
                     )
                     return cached
 
-        if not self.api_key or self.api_key == "your_odds_api_key_here":
-            logger.warning("No Odds API key set — returning empty game list")
+        if not self.api_key:
+            logger.warning("No Rundown API key set — returning empty game list")
             return []
 
-        url = f"{BASE_URL}/sports/{sport}/odds"
-        params = {
-            "apiKey":     self.api_key,
-            "regions":    "us",
-            "markets":    "h2h,totals",
-            "bookmakers": ",".join(bookmakers),
-            "oddsFormat": "american",
-        }
+        sport_ids = SPORT_IDS.get(sport)
+        if not sport_ids:
+            logger.warning(f"Unknown sport key: {sport}")
+            return []
 
+        # Fetch today and tomorrow (UTC) across all sport IDs (regular season + playoffs).
+        # Sleep 1.1s between requests to respect the free tier's 1 req/sec rate limit.
+        raw_events: list[dict] = []
+        for sport_id in sport_ids:
+            for delta_days in (0, 1):
+                date_str = (now + timedelta(days=delta_days)).strftime("%Y-%m-%d")
+                url = f"{BASE_URL}/sports/{sport_id}/events/{date_str}"
+                try:
+                    resp = self.session.get(url, params=self._auth_params, timeout=10)
+                    resp.raise_for_status()
+                    raw_events.extend(resp.json().get("events", []))
+                except Exception as e:
+                    logger.error(f"Rundown API error for {sport} {date_str}: {e}")
+                time.sleep(1.1)
+
+        if not raw_events:
+            logger.info(f"No events returned for {sport}")
+            return []
+
+        parsed, seen = [], set()
+        for event in raw_events:
+            game = self._parse_event(event, sport)
+            if game and game["game_id"] not in seen:
+                seen.add(game["game_id"])
+                parsed.append(game)
+
+        logger.info(f"Fetched {len(parsed)} games for {sport}")
+        with open(cache_file, "w") as f:
+            json.dump(parsed, f)
+        return parsed
+
+    def _parse_event(self, event: dict, sport_key: str) -> dict | None:
+        """Convert a TheRundown event to the normalized game dict the bot expects."""
         try:
-            resp = self.session.get(url, params=params, timeout=10)
-            if resp.status_code in (401, 422, 429):
-                logger.warning(
-                    f"Odds API quota/auth error ({resp.status_code}) — "
-                    f"falling back to ActionNetwork for {sport}"
-                )
-                return _get_action_network().get_upcoming_games(sport)
-            resp.raise_for_status()
-            games = resp.json()
-            remaining = resp.headers.get("x-requests-remaining", "?")
-            logger.info(f"Fetched {len(games)} games for {sport} (API requests remaining: {remaining})")
-            with open(cache_file, "w") as f:
-                json.dump(games, f)
-            return games
+            event_id = event["event_id"]
+
+            teams = event.get("teams_normalized") or event.get("teams", [])
+            home_team = away_team = None
+            for t in teams:
+                if t.get("is_home"):
+                    home_team = t["name"]
+                else:
+                    away_team = t["name"]
+
+            if not home_team or not away_team:
+                return None
+
+            home_ml = away_ml = None
+            total_line = over_odds = under_odds = None
+
+            for aff_data in event.get("lines", {}).values():
+                if home_ml is None:
+                    ml = aff_data.get("moneyline", {})
+                    h = ml.get("moneyline_home")
+                    a = ml.get("moneyline_away")
+                    # Real American odds always have abs >= 100; 0.0001 is TheRundown's "no line" sentinel
+                    if h and a and abs(h) >= 100 and abs(a) >= 100:
+                        home_ml = h
+                        away_ml = a
+
+                if total_line is None:
+                    tot = aff_data.get("total", {})
+                    tl = tot.get("total_over")
+                    if tl:
+                        total_line = tl
+                        over_odds  = tot.get("total_over_money")
+                        under_odds = tot.get("total_under_money")
+
+                if home_ml is not None and total_line is not None:
+                    break
+
+            if home_ml is None:
+                return None
+
+            return {
+                "_pre_parsed":   True,
+                "game_id":       event_id,
+                "sport":         sport_key,
+                "home_team":     home_team,
+                "away_team":     away_team,
+                "commence_time": event.get("event_date", ""),
+                "home_ml":       home_ml,
+                "away_ml":       away_ml,
+                "total_line":    total_line,
+                "over_odds":     over_odds,
+                "under_odds":    under_odds,
+                "home_implied":  OddsFetcher.american_to_implied(home_ml),
+                "away_implied":  OddsFetcher.american_to_implied(away_ml),
+            }
         except Exception as e:
-            logger.error(f"Odds API error for {sport}: {e} — falling back to ActionNetwork")
-            return _get_action_network().get_upcoming_games(sport)
+            logger.warning(f"Failed to parse Rundown event: {e}")
+            return None
 
     def get_active_sport(self, sports: list[str], bookmakers: list[str]) -> tuple[str | None, list[dict]]:
-        """
-        Checks each sport in order and returns the first one with upcoming games.
-        Respects API quota by checking cache first.
-        """
         for sport in sports:
             games = self.get_upcoming_games(sport, bookmakers)
             if games:
@@ -119,7 +184,6 @@ class OddsFetcher:
 
     @staticmethod
     def _game_approaching(games: list[dict], now: datetime, hours: int = 4) -> bool:
-        """Returns True if any game in the cached list starts within `hours` from now."""
         cutoff = now + timedelta(hours=hours)
         for g in games:
             ct = g.get("commence_time") or g.get("start_time")
@@ -135,60 +199,11 @@ class OddsFetcher:
 
     @staticmethod
     def parse_game(game: dict) -> dict | None:
-        """
-        Extracts a clean game record from raw Odds API response.
-        Returns None if odds are missing.
-        """
-        try:
-            home = game["home_team"]
-            away = game["away_team"]
-            commence = game["commence_time"]
-
-            h2h_odds   = {}
-            total_line = None
-            over_odds  = None
-            under_odds = None
-
-            for bookmaker in game.get("bookmakers", []):
-                for market in bookmaker.get("markets", []):
-                    if market["key"] == "h2h" and not h2h_odds:
-                        for outcome in market["outcomes"]:
-                            h2h_odds[outcome["name"]] = outcome["price"]
-                    if market["key"] == "totals" and total_line is None:
-                        for outcome in market["outcomes"]:
-                            if outcome["name"] == "Over":
-                                total_line = outcome.get("point")
-                                over_odds  = outcome["price"]
-                            elif outcome["name"] == "Under":
-                                under_odds = outcome["price"]
-
-            if not h2h_odds:
-                return None
-
-            home_ml = h2h_odds.get(home)
-            away_ml = h2h_odds.get(away)
-
-            return {
-                "game_id":      game["id"],
-                "sport":        game["sport_key"],
-                "home_team":    home,
-                "away_team":    away,
-                "commence_time": commence,
-                "home_ml":      home_ml,
-                "away_ml":      away_ml,
-                "total_line":   total_line,
-                "over_odds":    over_odds,
-                "under_odds":   under_odds,
-                "home_implied": OddsFetcher.american_to_implied(home_ml) if home_ml else None,
-                "away_implied": OddsFetcher.american_to_implied(away_ml) if away_ml else None,
-            }
-        except Exception as e:
-            logger.warning(f"Failed to parse game: {e}")
-            return None
+        """Pass-through for pre-parsed TheRundown games."""
+        return game if game.get("_pre_parsed") else None
 
     @staticmethod
     def american_to_implied(american_odds: float) -> float:
-        """Convert American odds to implied probability."""
         if american_odds > 0:
             return 100 / (american_odds + 100)
         else:
@@ -196,7 +211,6 @@ class OddsFetcher:
 
     @staticmethod
     def implied_to_american(prob: float) -> float:
-        """Convert probability to American odds."""
         if prob >= 0.5:
             return -(prob / (1 - prob)) * 100
         else:

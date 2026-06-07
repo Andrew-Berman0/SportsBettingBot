@@ -40,7 +40,7 @@ class BettingBotConfig:
     bankroll:  BankrollConfig = field(default_factory=BankrollConfig)
     model:     ModelConfig    = field(default_factory=ModelConfig)
     claude:    ClaudeConfig   = field(default_factory=ClaudeConfig)
-    odds_api_key: str         = field(default_factory=lambda: os.getenv("ODDS_API_KEY", ""))
+    odds_api_key: str         = field(default_factory=lambda: os.getenv("THE_RUNDOWN_API_KEY", ""))
     loop_interval_seconds: int = 3600   # check for new games every hour
     state_file: str = "bot_state.json"
     log_file:   str = "bot.log"

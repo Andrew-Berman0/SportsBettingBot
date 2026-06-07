@@ -38,15 +38,37 @@ def _load_state() -> dict:
         return json.load(f)
 
 
-def _fmt_odds(odds: float) -> str:
-    return f"+{int(odds)}" if odds > 0 else str(int(odds))
-
-
 def _fmt_date(iso: str, fmt: str = "%b %d") -> str:
     try:
         return datetime.fromisoformat(iso.replace("Z", "+00:00")).strftime(fmt)
     except Exception:
         return iso[:10] if iso else "—"
+
+
+def _fmt_odds(odds: float | None) -> str:
+    if odds is None:
+        return "—"
+    return f"+{int(odds)}" if odds > 0 else str(int(odds))
+
+
+def _prepare_pass(g: dict) -> dict:
+    p = dict(g)
+    sport = p.get("sport", "")
+    p["sport_label"] = SPORT_LABELS.get(sport, sport.upper())
+    p["matchup"]     = f"{p['away_team']} @ {p['home_team']}"
+    p["home_ml_str"] = _fmt_odds(p.get("home_ml"))
+    p["away_ml_str"] = _fmt_odds(p.get("away_ml"))
+    try:
+        ct = p.get("commence_time", "")
+        dt = datetime.fromisoformat(ct.replace("Z", "+00:00")).astimezone(ET)
+        p["game_time"] = dt.strftime("%-I:%M %p ET · %b %-d")
+    except Exception:
+        p["game_time"] = ""
+    p["home_edge_pct"] = f"{p.get('home_edge', 0) * 100:+.1f}%"
+    p["away_edge_pct"] = f"{p.get('away_edge', 0) * 100:+.1f}%"
+    p["claude_pct"]    = f"{p.get('claude_home_prob', 0) * 100:.0f}%"
+    p["market_pct"]    = f"{p.get('book_home_prob', 0) * 100:.0f}%"
+    return p
 
 
 def _prepare_bet(bet: dict) -> dict:
@@ -93,6 +115,19 @@ async def index(request: Request):
     closed.sort(key=lambda b: b.get("commence_time", ""), reverse=True)
 
     open_bets = [_prepare_bet(b) for b in state["open_bets"]]
+
+    # Today's passed games (ET date)
+    today_et = datetime.now(ET).date()
+    passed_today = []
+    for g in state.get("passed_games", []):
+        try:
+            passed_date = datetime.fromisoformat(g["passed_at"]).astimezone(ET).date()
+            if passed_date == today_et:
+                passed_today.append(_prepare_pass(g))
+        except Exception:
+            pass
+    passed_today.sort(key=lambda g: g.get("commence_time", ""))
+    today_label = datetime.now(ET).strftime("%A, %B %-d")
 
     # Overall stats
     total_staked = sum(b["stake"] for b in closed)
@@ -149,6 +184,8 @@ async def index(request: Request):
             "pnl_labels":      json.dumps(pnl_labels),
             "pnl_values":      json.dumps(pnl_values),
             "pnl_colors":      json.dumps(pnl_colors),
+            "passed_today":    passed_today,
+            "today_label":     today_label,
             "last_updated":    datetime.now(timezone.utc).strftime("%b %d, %Y %H:%M UTC"),
         },
     )

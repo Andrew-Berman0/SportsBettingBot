@@ -8,7 +8,7 @@ Persists state to JSON so it survives restarts.
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -24,6 +24,7 @@ class PaperBroker:
         self.open_bets  = []   # list of bet dicts
         self.closed_bets = []  # settled bets
         self.evaluated_game_ids: set[str] = set()  # games already analyzed — skip re-evaluation
+        self.passed_games: list[dict] = []          # games evaluated but not bet on
         self._load()
 
     # ------------------------------------------------------------------
@@ -109,6 +110,44 @@ class PaperBroker:
         self.closed_bets.extend(settled)
         self._save()
         return settled
+
+    def record_pass(
+        self,
+        game_id:          str,
+        sport:            str,
+        home_team:        str,
+        away_team:        str,
+        commence_time:    str | None,
+        reasoning:        str,
+        claude_home_prob: float,
+        book_home_prob:   float,
+        home_edge:        float,
+        away_edge:        float,
+        home_ml:          float | None = None,
+        away_ml:          float | None = None,
+    ) -> None:
+        self.passed_games.append({
+            "game_id":          game_id,
+            "sport":            sport,
+            "home_team":        home_team,
+            "away_team":        away_team,
+            "commence_time":    commence_time,
+            "reasoning":        reasoning,
+            "claude_home_prob": claude_home_prob,
+            "book_home_prob":   book_home_prob,
+            "home_edge":        round(home_edge, 4),
+            "away_edge":        round(away_edge, 4),
+            "home_ml":          home_ml,
+            "away_ml":          away_ml,
+            "passed_at":        datetime.now(timezone.utc).isoformat(),
+        })
+        # Keep only last 7 days to avoid unbounded growth
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        self.passed_games = [
+            g for g in self.passed_games
+            if datetime.fromisoformat(g["passed_at"]) > cutoff
+        ]
+        self._save()
 
     def mark_evaluated(self, game_id: str) -> None:
         """Record that we've already made a pass decision on this game."""
@@ -220,6 +259,7 @@ class PaperBroker:
             "open_bets":           self.open_bets,
             "closed_bets":         self.closed_bets,
             "evaluated_game_ids":  list(self.evaluated_game_ids),
+            "passed_games":        self.passed_games,
         }
         with open(STATE_FILE, "w") as f:
             json.dump(state, f, indent=2)
@@ -232,6 +272,7 @@ class PaperBroker:
             self.open_bets          = state.get("open_bets", [])
             self.closed_bets        = state.get("closed_bets", [])
             self.evaluated_game_ids = set(state.get("evaluated_game_ids", []))
+            self.passed_games       = state.get("passed_games", [])
             logger.info(
                 f"PaperBroker loaded — Bankroll: ${self.bankroll:,.2f} | "
                 f"Open: {len(self.open_bets)} | Closed: {len(self.closed_bets)}"
