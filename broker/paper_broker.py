@@ -11,6 +11,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from SportsBettingBot.notifications.email_notifier import notify_bet_placed, notify_bet_settled
+
 logger = logging.getLogger(__name__)
 
 STATE_FILE = Path(__file__).parent.parent / "broker_state.json"
@@ -77,6 +79,7 @@ class PaperBroker:
             f"BET PLACED: {away_team} @ {home_team} | {bet_type} {odds:+.0f} | "
             f"Stake: ${stake:.2f} | To win: ${bet['potential_payout'] - stake:.2f}"
         )
+        notify_bet_placed(bet, self.bankroll)
         return bet
 
     def settle_bet(self, game_id: str, home_score: int, away_score: int, total: float | None = None):
@@ -104,6 +107,7 @@ class PaperBroker:
                 f"BET SETTLED: {bet['away_team']} @ {bet['home_team']} | "
                 f"{bet['bet_type']} | {'WON' if won else 'LOST'} | P&L: ${bet['pnl']:+.2f}"
             )
+            notify_bet_settled(bet, self.bankroll)
             settled.append(bet)
 
         self.open_bets    = remaining
