@@ -153,13 +153,33 @@ class ESPNStatsFetcher:
         "icehockey_nhl":        ("hockey",     "nhl"),
     }
 
+    @staticmethod
+    def resolve_espn_nick(team_name: str) -> str:
+        """Return the last word of a team name to search in ESPN standings.
+        Works correctly because odds_fetcher now stores full 'City Mascot' names
+        (e.g. 'Oakland Athletics', 'Los Angeles Dodgers') so the last word is
+        always the unique nickname."""
+        return team_name.split()[-1]
+
+    # Scoreboard map includes NBA (for series context only — stats come from nba_api)
+    _SCOREBOARD_MAP = {
+        "basketball_nba":       ("basketball", "nba"),
+        "basketball_wnba":      ("basketball", "wnba"),
+        "americanfootball_nfl": ("football",   "nfl"),
+        "baseball_mlb":         ("baseball",   "mlb"),
+        "icehockey_nhl":        ("hockey",     "nhl"),
+    }
+
     # site.api.espn.com returns only a redirect link for some sports;
     # site.web.api.espn.com/apis/v2 has the full standings data
-    _STANDINGS_BASE = "https://site.web.api.espn.com/apis/v2/sports"
+    _STANDINGS_BASE  = "https://site.web.api.espn.com/apis/v2/sports"
+    _SCOREBOARD_BASE = "https://site.api.espn.com/apis/site/v2/sports"
+    _SERIES_CACHE_TTL = 4 * 3600  # seconds
 
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "Mozilla/5.0"})
+        self._series_cache: dict = {}  # {(sport_key, home_nick, away_nick): (ts, str|None)}
 
     def get_team_stats(self, sport_key: str) -> pd.DataFrame:
         """Returns basic team stats (win%, point diff) for the given sport."""
@@ -193,3 +213,60 @@ class ESPNStatsFetcher:
         except Exception as e:
             logger.error(f"ESPN stats fetch error ({league}): {e}")
             return pd.DataFrame()
+
+    def get_series_context(self, sport_key: str, home_team: str, away_team: str) -> str | None:
+        """
+        Returns the current playoff series standing for a matchup, e.g. 'VGK leads series 2-1'.
+        Scans the last 10 days of the ESPN scoreboard. Returns None for regular-season games.
+        Result is cached in memory for 4 hours to avoid hammering ESPN on every bot wake.
+        """
+        if sport_key not in self._SCOREBOARD_MAP:
+            return None
+
+        home_nick = home_team.lower().split()[-1]
+        away_nick = away_team.lower().split()[-1]
+        cache_key = (sport_key, home_nick, away_nick)
+
+        now_ts = time.time()
+        if cache_key in self._series_cache:
+            cached_ts, cached_ctx = self._series_cache[cache_key]
+            if now_ts - cached_ts < self._SERIES_CACHE_TTL:
+                return cached_ctx
+
+        league_sport, league = self._SCOREBOARD_MAP[sport_key]
+        from datetime import date, timedelta
+        today = date.today()
+        result = None
+
+        for delta in range(10):
+            d = today - timedelta(days=delta)
+            url = (f"{self._SCOREBOARD_BASE}/{league_sport}/{league}/scoreboard"
+                   f"?dates={d.strftime('%Y%m%d')}")
+            try:
+                resp = self.session.get(url, timeout=10)
+                resp.raise_for_status()
+                for event in resp.json().get("events", []):
+                    for comp in event.get("competitions", []):
+                        names = [
+                            c.get("team", {}).get("displayName", "").lower()
+                            for c in comp.get("competitors", [])
+                        ]
+                        if (any(home_nick in n for n in names) and
+                                any(away_nick in n for n in names)):
+                            series = comp.get("series", {})
+                            # ESPN summary is the useful field ("VGK leads series 2-1");
+                            # title is always the generic "Playoff Series"
+                            summary = series.get("summary") or series.get("title", "")
+                            if summary and summary.lower() != "playoff series":
+                                result = summary
+            except Exception as e:
+                logger.debug(f"Series context fetch error ({league} {d}): {e}")
+
+            if result:
+                break
+            time.sleep(0.2)
+
+        self._series_cache[cache_key] = (now_ts, result)
+        if result:
+            logger.info(f"Series context for {away_team} @ {home_team}: {result}")
+        return result

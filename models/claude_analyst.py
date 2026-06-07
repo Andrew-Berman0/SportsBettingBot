@@ -35,6 +35,7 @@ class ClaudeAnalyst:
         home_roster: str = "",
         away_roster: str = "",
         sport: str = "basketball_nba",
+        series_context: str | None = None,
     ) -> dict:
         """
         Asks Claude to analyze the game and return an adjusted home win probability.
@@ -49,7 +50,7 @@ class ClaudeAnalyst:
         """
         prompt = self._build_prompt(game, home_stats, away_stats, base_home_prob,
                                     home_injuries or [], away_injuries or [],
-                                    home_roster, away_roster, sport)
+                                    home_roster, away_roster, sport, series_context)
 
         try:
             message = self.client.messages.create(
@@ -71,7 +72,8 @@ class ClaudeAnalyst:
     def _build_prompt(self, game: dict, home_stats: dict, away_stats: dict,
                       base_prob: float, home_injuries: list, away_injuries: list,
                       home_roster: str, away_roster: str,
-                      sport: str = "basketball_nba") -> str:
+                      sport: str = "basketball_nba",
+                      series_context: str | None = None) -> str:
         home = game["home_team"]
         away = game["away_team"]
 
@@ -168,6 +170,23 @@ class ClaudeAnalyst:
         home_record = build_record(home_stats)
         away_record = build_record(away_stats)
 
+        series_block = (
+            f"\nPLAYOFF SERIES CONTEXT:\n- Current series standing: {series_context}\n"
+            if series_context else ""
+        )
+
+        missing = []
+        if not home_stats:
+            missing.append(home)
+        if not away_stats:
+            missing.append(away)
+        missing_note = (
+            f"\nDATA WARNING: Current-season statistics are unavailable for: {', '.join(missing)}. "
+            "For any team listed here, rely ONLY on the odds and roster/injury data above — "
+            "do NOT fill gaps using knowledge of past rosters, historical performance, or "
+            "reputation from your training data. Treat missing-data teams as unknown strength.\n"
+        ) if missing else ""
+
         return f"""You are an expert sports betting analyst. Analyze this upcoming game and provide a win probability estimate.
 
 GAME: {away} @ {home}
@@ -178,7 +197,7 @@ ODDS:
 - {home} moneyline: {game.get('home_ml', 'N/A')} (implied: {game.get('home_implied', 0):.1%})
 - {away} moneyline: {game.get('away_ml', 'N/A')} (implied: {game.get('away_implied', 0):.1%})
 - Total line: {game.get('total_line', 'N/A')}
-
+{series_block}
 HOME TEAM ({home}):
 - Record: {home_record}
 {build_stats_block(home_stats)}
@@ -194,8 +213,8 @@ AWAY TEAM ({away}):
 {fmt_injuries(away_injuries)}
 
 STATISTICAL MODEL ESTIMATE: {home} win probability = {base_prob:.1%}
-
-Based on this data, provide your analysis. Consider: home field advantage, rest/fatigue, recent momentum, injury impact, matchup style, and any other relevant factors you know about these teams.
+{missing_note}
+Based on this data, provide your analysis. Consider: home field advantage, rest/fatigue, recent momentum, injury impact, matchup style, series momentum and elimination pressure (if applicable), and any other relevant factors you know about these teams.
 
 Respond ONLY with valid JSON in this exact format:
 {{

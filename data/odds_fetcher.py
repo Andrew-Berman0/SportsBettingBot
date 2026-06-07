@@ -59,11 +59,11 @@ class OddsFetcher:
             if age_minutes < 90:
                 logger.info(f"Odds cache fresh ({age_minutes:.0f}min old) — {sport}")
                 with open(cache_file) as f:
-                    return json.load(f)
+                    return self._filter_valid(json.load(f))
 
             if age_minutes < 360:
                 with open(cache_file) as f:
-                    cached = json.load(f)
+                    cached = self._filter_valid(json.load(f))
                 if not self._game_approaching(cached, now, hours=4):
                     logger.info(
                         f"Odds cache ({age_minutes:.0f}min old), no game within 4h"
@@ -119,10 +119,16 @@ class OddsFetcher:
             teams = event.get("teams_normalized") or event.get("teams", [])
             home_team = away_team = None
             for t in teams:
+                # Combine city + mascot ("Los Angeles" + "Dodgers" → "Los Angeles Dodgers")
+                # to disambiguate multi-team cities (LA, NY, Chicago) and relocated teams
+                # (Oakland + Athletics → "Oakland Athletics", which ESPN stores as "Athletics").
+                name = t.get("name", "")
+                mascot = t.get("mascot", "")
+                full_name = f"{name} {mascot}".strip() if mascot else name
                 if t.get("is_home"):
-                    home_team = t["name"]
+                    home_team = full_name
                 else:
-                    away_team = t["name"]
+                    away_team = full_name
 
             if not home_team or not away_team:
                 return None
@@ -181,6 +187,14 @@ class OddsFetcher:
                 return sport, games
         logger.warning("No active sports found with upcoming games")
         return None, []
+
+    @staticmethod
+    def _filter_valid(games: list[dict]) -> list[dict]:
+        """Drop any cached games whose odds contain TheRundown's no-line sentinel (abs < 100)."""
+        return [
+            g for g in games
+            if g.get("home_ml") is not None and abs(g["home_ml"]) >= 100
+        ]
 
     @staticmethod
     def _game_approaching(games: list[dict], now: datetime, hours: int = 4) -> bool:

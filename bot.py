@@ -119,8 +119,7 @@ def _next_sleep_seconds(all_games_raw: list, broker: PaperBroker, now: datetime)
 
 
 def get_team_stats(sport: str, team_name: str, nba_fetcher: NBAStatsFetcher,
-                   espn_fetcher: ESPNStatsFetcher, nba_stats_df=None,
-                   espn_stats_df=None) -> dict:
+                   nba_stats_df=None, espn_stats_df=None) -> dict:
     if sport == "basketball_nba" and nba_stats_df is not None and not nba_stats_df.empty:
         row = nba_stats_df[nba_stats_df["TEAM_NAME"].str.contains(
             team_name.split()[-1], case=False, na=False
@@ -133,9 +132,13 @@ def get_team_stats(sport: str, team_name: str, nba_fetcher: NBAStatsFetcher,
                 stats.update(form)
             return stats
     elif espn_stats_df is not None and not espn_stats_df.empty:
-        row = espn_stats_df[espn_stats_df["team"].str.contains(
-            team_name.split()[-1], case=False, na=False
-        )]
+        # Prefer exact full-name match ("Boston Red Sox" → "Boston Red Sox").
+        # Fall back to last-word nick for relocated teams whose ESPN name lost the city
+        # ("Oakland Athletics" → ESPN "Athletics").
+        row = espn_stats_df[espn_stats_df["team"].str.lower() == team_name.lower()]
+        if row.empty:
+            nick = ESPNStatsFetcher.resolve_espn_nick(team_name)
+            row = espn_stats_df[espn_stats_df["team"].str.contains(nick, case=False, na=False)]
         if not row.empty:
             return row.iloc[0].to_dict()
     return {}
@@ -184,10 +187,8 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     home_team = game["home_team"]
     away_team = game["away_team"]
 
-    home_stats = get_team_stats(sport, home_team, nba_fetcher, espn_fetcher,
-                                nba_stats_df, espn_stats_df)
-    away_stats = get_team_stats(sport, away_team, nba_fetcher, espn_fetcher,
-                                nba_stats_df, espn_stats_df)
+    home_stats = get_team_stats(sport, home_team, nba_fetcher, nba_stats_df, espn_stats_df)
+    away_stats = get_team_stats(sport, away_team, nba_fetcher, nba_stats_df, espn_stats_df)
 
     home_injuries = injury_fetcher.get_team_injuries(home_team, sport=sport, max_age_minutes=30)
     away_injuries = injury_fetcher.get_team_injuries(away_team, sport=sport, max_age_minutes=30)
@@ -203,11 +204,16 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
 
     base_home_prob = book_home_prob
 
+    # Fetch playoff series context for NBA and NHL so Claude knows the series score
+    series_context = None
+    if sport in ("basketball_nba", "icehockey_nhl"):
+        series_context = espn_fetcher.get_series_context(sport, home_team, away_team)
+
     logger.info(f"Analyzing: {away_team} @ {home_team} ({hours_until:.1f}h away)")
     analysis = claude.analyze_game(game, home_stats, away_stats, base_home_prob,
                                    home_injuries=home_injuries, away_injuries=away_injuries,
                                    home_roster=home_roster, away_roster=away_roster,
-                                   sport=sport)
+                                   sport=sport, series_context=series_context)
 
     our_home_prob = analysis["adjusted_home_prob"]
     our_away_prob = 1 - our_home_prob
