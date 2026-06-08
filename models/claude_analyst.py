@@ -229,7 +229,7 @@ STATISTICAL MODEL ESTIMATE: {home} win probability = {base_prob:.1%}
 {missing_note}
 Based on this data, provide your analysis. Consider: home field advantage, rest/fatigue, recent momentum, injury impact, matchup style, series momentum and elimination pressure (if applicable), and any other relevant factors you know about these teams.
 
-IMPORTANT: For any claims about specific players — who is available, who is starting, who is injured, who is in form — rely ONLY on the roster, injury list, and starting pitcher data provided above. Do not assert a player's availability, absence, or role based on your training data if they are not mentioned in the data above.
+CRITICAL PLAYER DATA RULE: Your reasoning may ONLY name specific players who appear in the roster or injury list provided above. Do NOT name any player from your training data who is not listed — rosters change constantly and your training data is stale. If a player you recall is not in the data above, they may have been traded, cut, or retired. Mentioning a player not in the provided data is a factual error. Base all player-specific claims strictly on the lists above.
 
 Respond ONLY with valid JSON in this exact format:
 {{
