@@ -38,9 +38,12 @@ def _load_state() -> dict:
         return json.load(f)
 
 
-def _fmt_date(iso: str, fmt: str = "%b %d") -> str:
+def _fmt_date(iso: str, fmt: str = "%b %d", tz=None) -> str:
     try:
-        return datetime.fromisoformat(iso.replace("Z", "+00:00")).strftime(fmt)
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        if tz:
+            dt = dt.astimezone(tz)
+        return dt.strftime(fmt)
     except Exception:
         return iso[:10] if iso else "—"
 
@@ -81,7 +84,7 @@ def _prepare_bet(bet: dict) -> dict:
     b["bet_label"]   = "Home ML" if b["bet_type"] == "home_ml" else "Away ML"
     b["odds_str"]    = _fmt_odds(b.get("odds", 0))
     b["stake_str"]   = f"${b['stake']:.2f}"
-    b["placed_date"] = _fmt_date(b.get("placed_at", ""), "%b %d, %H:%M UTC")
+    b["placed_date"] = _fmt_date(b.get("placed_at", ""), "%-m/%-d %-I:%M %p ET", tz=ET)
     try:
         ct = b.get("commence_time", "")
         dt = datetime.fromisoformat(ct.replace("Z", "+00:00")).astimezone(ET)
