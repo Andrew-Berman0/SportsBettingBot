@@ -9,7 +9,7 @@ NFL/MLB/NHL: ESPN unofficial API (free, no key required)
 
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import date as date_type, datetime, timedelta
 from pathlib import Path
 
 
@@ -27,6 +27,13 @@ import pandas as pd
 import requests
 
 logger = logging.getLogger(__name__)
+
+try:
+    import nfl_data_py as nfl_data
+    _NFL_DATA_AVAILABLE = True
+except ImportError:
+    _NFL_DATA_AVAILABLE = False
+    nfl_data = None
 
 CACHE_DIR = Path(__file__).parent.parent / "data" / "raw"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -323,3 +330,543 @@ class ESPNStatsFetcher:
             except Exception as e:
                 logger.debug(f"Starting pitcher fetch error: {e}")
         return {}
+
+
+class NHLStatsFetcher:
+    """
+    Fetches NHL advanced stats from the official NHL Stats API (api.nhle.com).
+    Adds: PP%, PK%, shots/game, and the team's top goalie save%/GAA.
+    No API key required.
+    Tries playoff data first (gameTypeId=3); falls back to regular season when
+    a team hasn't played enough playoff games (< 4).
+    """
+
+    _TEAM_URL   = "https://api.nhle.com/stats/rest/en/team/summary"
+    _GOALIE_URL = "https://api.nhle.com/stats/rest/en/goalie/summary"
+    _CACHE_TTL_HOURS = 6
+
+    def __init__(self):
+        self.session = requests.Session()
+        self.session.headers.update({"User-Agent": "Mozilla/5.0"})
+
+    def get_team_stats(self, season: str | None = None) -> pd.DataFrame:
+        """
+        Returns one row per NHL team:
+          team, nhl_abbrev, pp_pct, pk_pct, shots_for_pg, shots_against_pg,
+          goalie_name, goalie_sv_pct, goalie_gaa
+        """
+        season_id = season or self._current_season_id()
+        cache_file = CACHE_DIR / f"nhl_advanced_stats_{season_id}.parquet"
+        if cache_file.exists():
+            age_hours = (time.time() - cache_file.stat().st_mtime) / 3600
+            if age_hours < self._CACHE_TTL_HOURS:
+                return pd.read_parquet(cache_file)
+        try:
+            rs = self._fetch_team_summary(season_id, game_type=2)
+            po = self._fetch_team_summary(season_id, game_type=3)
+
+            # Start from regular season; overlay playoff stats for teams with 4+ PO games
+            stat_cols = ["pp_pct", "pk_pct", "shots_for_pg", "shots_against_pg"]
+            if not rs.empty and not po.empty:
+                po_lookup = po.set_index("team")[stat_cols + ["nhl_gp"]].rename(
+                    columns={c: c + "_po" for c in stat_cols} | {"nhl_gp": "nhl_gp_po"}
+                )
+                df = rs.join(po_lookup, on="team", how="left")
+                in_playoffs = df["nhl_gp_po"].fillna(0) >= 4
+                for col in stat_cols:
+                    po_col = col + "_po"
+                    if po_col in df.columns:
+                        df.loc[in_playoffs, col] = df.loc[in_playoffs, po_col]
+                df = df.drop(columns=[c for c in df.columns if c.endswith("_po")], errors="ignore")
+            elif not po.empty:
+                df = po
+            else:
+                df = rs if not rs.empty else pd.DataFrame()
+
+            if df.empty:
+                return df
+
+            # Goalie: prefer playoff starters (most games started), fall back to RS
+            goalies = self._fetch_top_goalies(season_id, game_type=3)
+            if goalies.empty:
+                goalies = self._fetch_top_goalies(season_id, game_type=2)
+            if not goalies.empty:
+                df = df.merge(goalies, on="nhl_abbrev", how="left")
+
+            df.to_parquet(cache_file)
+            logger.info(f"Fetched NHL advanced stats: {len(df)} teams (season {season_id})")
+            return df
+        except Exception as e:
+            logger.error(f"NHL stats fetch error: {e}")
+            return pd.DataFrame()
+
+    def _fetch_team_summary(self, season_id: str, game_type: int) -> pd.DataFrame:
+        params = {
+            "isAggregate": "false",
+            "isGame":      "false",
+            "start":       0,
+            "limit":       32,
+            "cayenneExp":  f"gameTypeId={game_type} and seasonId<={season_id} and seasonId>={season_id}",
+        }
+        try:
+            r = self.session.get(self._TEAM_URL, params=params, timeout=10)
+            r.raise_for_status()
+            rows = []
+            for t in r.json().get("data", []):
+                rows.append({
+                    "team":             t.get("teamFullName"),
+                    "nhl_abbrev":       t.get("teamAbbrevs") or t.get("teamAbbrev"),
+                    "nhl_gp":           t.get("gamesPlayed"),
+                    "pp_pct":           t.get("ppPct"),
+                    "pk_pct":           t.get("pkPct"),
+                    "shots_for_pg":     t.get("shotsForPerGame"),
+                    "shots_against_pg": t.get("shotsAgainstPerGame"),
+                })
+            return pd.DataFrame(rows).dropna(subset=["team"])
+        except Exception as e:
+            logger.warning(f"NHL team summary failed (gameType={game_type}): {e}")
+            return pd.DataFrame()
+
+    def _fetch_top_goalies(self, season_id: str, game_type: int) -> pd.DataFrame:
+        params = {
+            "isAggregate": "false",
+            "isGame":      "false",
+            "start":       0,
+            "limit":       200,
+            "cayenneExp":  f"gameTypeId={game_type} and seasonId<={season_id} and seasonId>={season_id}",
+        }
+        try:
+            r = self.session.get(self._GOALIE_URL, params=params, timeout=10)
+            r.raise_for_status()
+            rows = []
+            for g in r.json().get("data", []):
+                rows.append({
+                    "nhl_abbrev":   g.get("teamAbbrevs") or g.get("teamAbbrev"),
+                    "goalie_name":  g.get("goalieFullName"),
+                    "goalie_sv_pct": g.get("savePctg"),
+                    "goalie_gaa":   g.get("goalsAgainstAverage"),
+                    "goalie_gp":    g.get("gamesStarted") or g.get("gamesPlayed") or 0,
+                })
+            df = pd.DataFrame(rows).dropna(subset=["nhl_abbrev"])
+            if df.empty:
+                return df
+            # Top goalie per team = most games started
+            df = (df.sort_values("goalie_gp", ascending=False)
+                    .groupby("nhl_abbrev", as_index=False)
+                    .first())
+            return df[["nhl_abbrev", "goalie_name", "goalie_sv_pct", "goalie_gaa"]]
+        except Exception as e:
+            logger.warning(f"NHL goalie fetch failed (gameType={game_type}): {e}")
+            return pd.DataFrame()
+
+    def get_rest_days(self, abbrev: str, game_date: datetime) -> int | None:
+        """
+        Returns days since the team's last completed game before game_date.
+        0 = back-to-back. None = schedule unavailable.
+        """
+        target = game_date.date() if hasattr(game_date, "date") else game_date
+        months = [target.strftime("%Y-%m")]
+        if target.day <= 7:
+            prev = (target.replace(day=1) - timedelta(days=1))
+            months.append(prev.strftime("%Y-%m"))
+
+        played: list[date_type] = []
+        for month in months:
+            url = f"https://api-web.nhle.com/v1/club-schedule/{abbrev}/month/{month}"
+            try:
+                r = self.session.get(url, timeout=10)
+                r.raise_for_status()
+                for g in r.json().get("games", []):
+                    # gameState 7 = final in the new API; "OFF" and "FINAL" are also used
+                    if g.get("gameState") in ("OFF", "FINAL", "7", 7):
+                        try:
+                            gd = datetime.strptime(g["gameDate"], "%Y-%m-%d").date()
+                            if gd < target:
+                                played.append(gd)
+                        except (KeyError, ValueError):
+                            pass
+            except Exception:
+                pass
+
+        if not played:
+            return None
+        return (target - max(played)).days
+
+    @staticmethod
+    def _current_season_id() -> str:
+        today = datetime.today()
+        start = today.year if today.month >= 10 else today.year - 1
+        return f"{start}{start + 1}"
+
+
+class WNBAStatsFetcher:
+    """
+    Augments ESPN standings data with per-team shooting and ball-control
+    stats from ESPN's team statistics endpoint.
+    Adds: FG%, 3PT%, assist-to-turnover ratio, turnovers/game, rebounds/game.
+    No API key required. Fetches once per team per session (15 calls, cached 6h).
+    """
+
+    _TEAMS_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/teams"
+    _STATS_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/teams/{tid}/statistics"
+    _CACHE_TTL_HOURS = 6
+
+    def __init__(self):
+        self.session = requests.Session()
+        self.session.headers.update({"User-Agent": "Mozilla/5.0"})
+
+    def get_team_stats(self) -> pd.DataFrame:
+        """
+        Returns a DataFrame with one row per WNBA team:
+          team, fg_pct, three_pct, ast_to_ratio, avg_turnovers,
+          avg_rebounds, avg_off_rebounds
+        """
+        cache_file = CACHE_DIR / f"wnba_advanced_stats_{datetime.today().year}.parquet"
+        if cache_file.exists():
+            age_hours = (time.time() - cache_file.stat().st_mtime) / 3600
+            if age_hours < self._CACHE_TTL_HOURS:
+                return pd.read_parquet(cache_file)
+
+        try:
+            teams = self._fetch_team_list()
+            rows = []
+            for tid, tname in teams:
+                stats = self._fetch_team_stats(tid)
+                if stats:
+                    rows.append({"team": tname, **stats})
+                time.sleep(0.2)
+            df = pd.DataFrame(rows)
+            df.to_parquet(cache_file)
+            logger.info(f"Fetched WNBA advanced stats: {len(df)} teams")
+            return df
+        except Exception as e:
+            logger.error(f"WNBA advanced stats fetch error: {e}")
+            return pd.DataFrame()
+
+    def _fetch_team_list(self) -> list[tuple[str, str]]:
+        r = self.session.get(self._TEAMS_URL, timeout=10)
+        r.raise_for_status()
+        teams = (r.json().get("sports", [{}])[0]
+                  .get("leagues", [{}])[0]
+                  .get("teams", []))
+        return [(t["team"]["id"], t["team"]["displayName"]) for t in teams]
+
+    def _fetch_team_stats(self, tid: str) -> dict:
+        try:
+            r = self.session.get(self._STATS_URL.format(tid=tid), timeout=10)
+            r.raise_for_status()
+            cats = (r.json().get("results", {})
+                     .get("stats", {})
+                     .get("categories", []))
+            flat = {}
+            for cat in cats:
+                for stat in cat.get("stats", []):
+                    flat[stat["name"]] = stat.get("value")
+            return {
+                "fg_pct":           flat.get("fieldGoalPct"),
+                "three_pct":        flat.get("threePointPct"),
+                "ast_to_ratio":     flat.get("assistTurnoverRatio"),
+                "avg_turnovers":    flat.get("avgTurnovers"),
+                "avg_rebounds":     flat.get("avgRebounds"),
+                "avg_off_rebounds": flat.get("avgOffensiveRebounds"),
+                "avg_steals":       flat.get("avgSteals"),
+                "avg_blocks":       flat.get("avgBlocks"),
+            }
+        except Exception:
+            return {}
+
+
+class MLBStatsFetcher:
+    """
+    Fetches advanced MLB team stats from the official stats.mlb.com API.
+    Provides team ERA/WHIP/K9, bullpen ERA, and offensive OPS/OBP/SLG.
+    No API key required.
+    """
+
+    _BASE = "https://statsapi.mlb.com/api/v1"
+    _CACHE_TTL_HOURS = 6
+
+    def __init__(self):
+        self.session = requests.Session()
+        self.session.headers.update({"User-Agent": "Mozilla/5.0"})
+
+    def get_team_stats(self, season: int | None = None) -> pd.DataFrame:
+        """
+        Returns a DataFrame (one row per team) with:
+          team, team_era, team_whip, team_k9, team_bb9, team_hr9,
+          bullpen_era, team_ops, team_obp, team_slg, team_avg, team_runs, team_hr
+        """
+        year = season or datetime.today().year
+        cache_file = CACHE_DIR / f"mlb_advanced_stats_{year}.parquet"
+
+        if cache_file.exists():
+            age_hours = (time.time() - cache_file.stat().st_mtime) / 3600
+            if age_hours < self._CACHE_TTL_HOURS:
+                return pd.read_parquet(cache_file)
+
+        try:
+            pitching_df = self._fetch_team_pitching(year)
+            hitting_df  = self._fetch_team_hitting(year)
+            bullpen_df  = self._fetch_bullpen_era(year)
+
+            df = pitching_df.merge(hitting_df, on="team", how="outer")
+            df = df.merge(bullpen_df, on="team", how="left")
+            df.to_parquet(cache_file)
+            logger.info(f"Fetched MLB advanced stats: {len(df)} teams ({year})")
+            return df
+        except Exception as e:
+            logger.error(f"MLB advanced stats fetch error: {e}")
+            return pd.DataFrame()
+
+    def _fetch_team_pitching(self, year: int) -> pd.DataFrame:
+        r = self.session.get(f"{self._BASE}/teams/stats", params={
+            "season": year, "stats": "season", "group": "pitching",
+            "gameType": "R", "sportId": 1,
+        }, timeout=10)
+        r.raise_for_status()
+        rows = []
+        for sp in r.json().get("stats", [{}])[0].get("splits", []):
+            st = sp["stat"]
+            rows.append({
+                "team":      sp["team"]["name"],
+                "team_era":  st.get("era"),
+                "team_whip": st.get("whip"),
+                "team_k9":   st.get("strikeoutsPer9Inn"),
+                "team_bb9":  st.get("walksPer9Inn"),
+                "team_hr9":  st.get("homeRunsPer9"),
+            })
+        return pd.DataFrame(rows)
+
+    def _fetch_team_hitting(self, year: int) -> pd.DataFrame:
+        r = self.session.get(f"{self._BASE}/teams/stats", params={
+            "season": year, "stats": "season", "group": "hitting",
+            "gameType": "R", "sportId": 1,
+        }, timeout=10)
+        r.raise_for_status()
+        rows = []
+        for sp in r.json().get("stats", [{}])[0].get("splits", []):
+            st = sp["stat"]
+            rows.append({
+                "team":      sp["team"]["name"],
+                "team_ops":  st.get("ops"),
+                "team_obp":  st.get("obp"),
+                "team_slg":  st.get("slg"),
+                "team_avg":  st.get("avg"),
+                "team_runs": st.get("runs"),
+                "team_hr":   st.get("homeRuns"),
+            })
+        return pd.DataFrame(rows)
+
+    def _fetch_bullpen_era(self, year: int) -> pd.DataFrame:
+        """Aggregate ERA for relievers only (gamesStarted=0, gamesPlayed>=5) per team."""
+        from collections import defaultdict
+        r = self.session.get(f"{self._BASE}/stats", params={
+            "stats": "season", "group": "pitching", "gameType": "R",
+            "season": year, "sportId": 1, "limit": 500, "playerPool": "All",
+        }, timeout=15)
+        r.raise_for_status()
+        splits = r.json().get("stats", [{}])[0].get("splits", [])
+
+        team_bp: dict = defaultdict(lambda: {"earned_runs": 0, "outs": 0.0})
+        for sp in splits:
+            st = sp["stat"]
+            if st.get("gamesStarted", 1) != 0 or st.get("gamesPlayed", 0) < 5:
+                continue
+            team = sp.get("team", {}).get("name", "")
+            if not team:
+                continue
+            try:
+                ip_str = str(st.get("inningsPitched", "0"))
+                parts = ip_str.split(".")
+                innings = float(parts[0]) + (float(parts[1]) / 3 if len(parts) > 1 else 0)
+                team_bp[team]["earned_runs"] += st.get("earnedRuns", 0)
+                team_bp[team]["outs"] += innings * 3
+            except Exception:
+                continue
+
+        rows = []
+        for team, d in team_bp.items():
+            bp_era = round((d["earned_runs"] * 27) / d["outs"], 2) if d["outs"] > 0 else None
+            rows.append({"team": team, "bullpen_era": bp_era})
+        return pd.DataFrame(rows)
+
+
+class NFLStatsFetcher:
+    """
+    NFL advanced team stats from two sources:
+      1. ESPN per-team statistics endpoint  — yards/game, sacks, turnover differential
+      2. nfl_data_py (nflverse)             — offensive/defensive EPA per play
+         Requires: pip install nfl_data_py  (gracefully skipped if unavailable)
+    """
+
+    _TEAMS_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams"
+    _STATS_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/{tid}/statistics"
+    _CACHE_TTL_HOURS = 6
+    _EPA_CACHE_TTL_HOURS = 24
+
+    # ESPN full name → nflverse abbreviation (used for nfl_data_py lookups)
+    _TEAM_ABBREVS: dict[str, str] = {
+        "Buffalo Bills": "BUF",        "Miami Dolphins": "MIA",
+        "New England Patriots": "NE",  "New York Jets": "NYJ",
+        "Baltimore Ravens": "BAL",     "Cincinnati Bengals": "CIN",
+        "Cleveland Browns": "CLE",     "Pittsburgh Steelers": "PIT",
+        "Houston Texans": "HOU",       "Indianapolis Colts": "IND",
+        "Jacksonville Jaguars": "JAX", "Tennessee Titans": "TEN",
+        "Denver Broncos": "DEN",       "Kansas City Chiefs": "KC",
+        "Las Vegas Raiders": "LV",     "Los Angeles Chargers": "LAC",
+        "Dallas Cowboys": "DAL",       "New York Giants": "NYG",
+        "Philadelphia Eagles": "PHI",  "Washington Commanders": "WAS",
+        "Chicago Bears": "CHI",        "Detroit Lions": "DET",
+        "Green Bay Packers": "GB",     "Minnesota Vikings": "MIN",
+        "Atlanta Falcons": "ATL",      "Carolina Panthers": "CAR",
+        "New Orleans Saints": "NO",    "Tampa Bay Buccaneers": "TB",
+        "Arizona Cardinals": "ARI",    "Los Angeles Rams": "LA",
+        "San Francisco 49ers": "SF",   "Seattle Seahawks": "SEA",
+    }
+
+    def __init__(self):
+        self.session = requests.Session()
+        self.session.headers.update({"User-Agent": "Mozilla/5.0"})
+
+    def get_team_stats(self, season: int | None = None) -> pd.DataFrame:
+        """Returns one row per NFL team with ESPN stats merged with EPA."""
+        season = season or self._current_nfl_season()
+        cache_file = CACHE_DIR / f"nfl_advanced_stats_{season}.parquet"
+        if cache_file.exists():
+            age_hours = (time.time() - cache_file.stat().st_mtime) / 3600
+            if age_hours < self._CACHE_TTL_HOURS:
+                return pd.read_parquet(cache_file)
+        try:
+            espn_df = self._fetch_espn_stats()
+            epa_df  = self._fetch_epa(season)
+            if not espn_df.empty and not epa_df.empty:
+                df = espn_df.merge(epa_df, on="team", how="left")
+            else:
+                df = espn_df if not espn_df.empty else epa_df
+            if not df.empty:
+                df.to_parquet(cache_file)
+                logger.info(f"Fetched NFL advanced stats: {len(df)} teams (season {season})")
+            return df
+        except Exception as e:
+            logger.error(f"NFL stats fetch error: {e}")
+            return pd.DataFrame()
+
+    def get_rest_days(self, team_name: str, game_date: datetime) -> int | None:
+        """
+        Returns days since the team's last completed game before game_date.
+        Requires nfl_data_py. Returns None if unavailable.
+        """
+        if not _NFL_DATA_AVAILABLE:
+            return None
+        abbrev = (self._TEAM_ABBREVS.get(team_name) or
+                  next((v for k, v in self._TEAM_ABBREVS.items()
+                        if k.split()[-1] == team_name.split()[-1]), None))
+        if not abbrev:
+            return None
+        target = game_date.date() if hasattr(game_date, "date") else game_date
+        season = target.year if target.month >= 9 else target.year - 1
+        try:
+            schedules = nfl_data.import_schedules([season])
+            team_games = schedules[
+                ((schedules["home_team"] == abbrev) | (schedules["away_team"] == abbrev)) &
+                schedules["home_score"].notna()
+            ].copy()
+            team_games["gameday"] = pd.to_datetime(team_games["gameday"]).dt.date
+            played = team_games[team_games["gameday"] < target]["gameday"]
+            if played.empty:
+                return None
+            return (target - played.max()).days
+        except Exception as e:
+            logger.warning(f"NFL rest days failed for {team_name}: {e}")
+            return None
+
+    # ------------------------------------------------------------------
+    # Private
+    # ------------------------------------------------------------------
+
+    def _fetch_espn_stats(self) -> pd.DataFrame:
+        try:
+            r = self.session.get(self._TEAMS_URL, timeout=10)
+            r.raise_for_status()
+            teams = (r.json().get("sports", [{}])[0]
+                      .get("leagues", [{}])[0]
+                      .get("teams", []))
+            rows = []
+            for t in teams:
+                tid   = t["team"]["id"]
+                tname = t["team"]["displayName"]
+                stats = self._fetch_team_stats(tid)
+                if stats:
+                    rows.append({"team": tname, **stats})
+                time.sleep(0.2)
+            return pd.DataFrame(rows)
+        except Exception as e:
+            logger.error(f"NFL ESPN fetch error: {e}")
+            return pd.DataFrame()
+
+    def _fetch_team_stats(self, tid: str) -> dict:
+        try:
+            r = self.session.get(self._STATS_URL.format(tid=tid), timeout=10)
+            r.raise_for_status()
+            cats = (r.json().get("results", {})
+                     .get("stats", {})
+                     .get("categories", []))
+            flat: dict = {}
+            for cat in cats:
+                prefix = cat.get("name", "")
+                for stat in cat.get("stats", []):
+                    flat[f"{prefix}_{stat['name']}"] = stat.get("value")
+            return {
+                "pass_yards_pg":   (flat.get("passing_avgYards")
+                                    or flat.get("passing_passingYardsPerGame")),
+                "rush_yards_pg":   (flat.get("rushing_avgYards")
+                                    or flat.get("rushing_rushingYardsPerGame")),
+                "sacks_allowed":   (flat.get("passing_sacks")
+                                    or flat.get("general_sacksAllowed")),
+                "def_sacks":        flat.get("defensive_sacks"),
+                "giveaways":       (flat.get("general_giveaways")
+                                    or flat.get("scoring_giveaways")),
+                "takeaways":       (flat.get("general_takeaways")
+                                    or flat.get("defensive_takeaways")),
+                "to_differential": (flat.get("general_turnoverRatio")
+                                    or flat.get("general_turnoverDifferential")),
+            }
+        except Exception:
+            return {}
+
+    def _fetch_epa(self, season: int) -> pd.DataFrame:
+        if not _NFL_DATA_AVAILABLE:
+            return pd.DataFrame()
+        epa_cache = CACHE_DIR / f"nfl_epa_{season}.parquet"
+        if epa_cache.exists():
+            age_hours = (time.time() - epa_cache.stat().st_mtime) / 3600
+            if age_hours < self._EPA_CACHE_TTL_HOURS:
+                return pd.read_parquet(epa_cache)
+        try:
+            pbp = nfl_data.import_pbp_data(
+                years=[season],
+                columns=["posteam", "defteam", "epa", "play_type"],
+                downcast=True,
+            )
+            plays = pbp[pbp["play_type"].isin(["pass", "run"])].dropna(subset=["epa"])
+            off  = plays.groupby("posteam")["epa"].mean().round(3)
+            def_ = plays.groupby("defteam")["epa"].mean().round(3)
+            _rev = {v: k for k, v in self._TEAM_ABBREVS.items()}
+            df = (off.rename("off_epa_per_play")
+                     .to_frame()
+                     .join(def_.rename("def_epa_allowed_per_play"), how="outer")
+                     .reset_index()
+                     .rename(columns={"index": "abbrev", "posteam": "abbrev"}))
+            df["team"] = df["abbrev"].map(_rev)
+            df = df.dropna(subset=["team"])[["team", "off_epa_per_play", "def_epa_allowed_per_play"]]
+            df.to_parquet(epa_cache)
+            logger.info(f"Fetched NFL EPA: {len(df)} teams (season {season})")
+            return df
+        except Exception as e:
+            logger.error(f"NFL EPA fetch error: {e}")
+            return pd.DataFrame()
+
+    @staticmethod
+    def _current_nfl_season() -> int:
+        today = datetime.today()
+        return today.year if today.month >= 9 else today.year - 1

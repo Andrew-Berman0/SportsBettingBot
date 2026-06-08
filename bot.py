@@ -33,7 +33,8 @@ sys.path.insert(0, str(_here if (_here / "SportsBettingBot").is_dir() else _here
 
 from SportsBettingBot.config import CONFIG
 from SportsBettingBot.data.odds_fetcher import OddsFetcher
-from SportsBettingBot.data.stats_fetcher import NBAStatsFetcher, ESPNStatsFetcher
+from SportsBettingBot.data.stats_fetcher import NBAStatsFetcher, ESPNStatsFetcher, MLBStatsFetcher, NHLStatsFetcher, WNBAStatsFetcher, NFLStatsFetcher
+from SportsBettingBot.data.weather_fetcher import WeatherFetcher
 from SportsBettingBot.data.injury_fetcher import InjuryFetcher
 from SportsBettingBot.data.roster_fetcher import RosterFetcher
 from SportsBettingBot.data.results_fetcher import ResultsFetcher
@@ -154,7 +155,10 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
                   espn_fetcher: ESPNStatsFetcher, injury_fetcher: InjuryFetcher,
                   roster_fetcher: RosterFetcher, nba_stats_df, espn_stats_df,
                   engineer: FeatureEngineer, claude: ClaudeAnalyst,
-                  broker: PaperBroker) -> None:
+                  broker: PaperBroker,
+                  nhl_fetcher: NHLStatsFetcher | None = None,
+                  nfl_fetcher: NFLStatsFetcher | None = None,
+                  weather_fetcher: WeatherFetcher | None = None) -> None:
     """Run the full analysis pipeline for a single game and place a bet if value found."""
     game = game_raw if game_raw.get("_pre_parsed") else OddsFetcher.parse_game(game_raw)
     if not game:
@@ -196,6 +200,23 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     home_stats = get_team_stats(sport, home_team, nba_fetcher, nba_stats_df, espn_stats_df)
     away_stats = get_team_stats(sport, away_team, nba_fetcher, nba_stats_df, espn_stats_df)
 
+    if sport == "icehockey_nhl" and nhl_fetcher is not None:
+        for stats in (home_stats, away_stats):
+            abbrev = stats.get("nhl_abbrev")
+            if abbrev:
+                stats["rest_days"] = nhl_fetcher.get_rest_days(abbrev, commence)
+
+    weather = None
+    if sport == "americanfootball_nfl":
+        if nfl_fetcher is not None:
+            for team_name, stats in ((home_team, home_stats), (away_team, away_stats)):
+                stats["rest_days"] = nfl_fetcher.get_rest_days(team_name, commence)
+        if weather_fetcher is not None:
+            weather = weather_fetcher.get_game_weather(home_team, commence)
+            if weather:
+                label = "dome" if weather.get("is_dome") else f"{weather.get('temp')}°F, {weather.get('wind_speed')} mph wind"
+                logger.info(f"  Weather: {label}")
+
     home_injuries = injury_fetcher.get_team_injuries(home_team, sport=sport, max_age_minutes=30)
     away_injuries = injury_fetcher.get_team_injuries(away_team, sport=sport, max_age_minutes=30)
     home_roster   = roster_fetcher.get_roster_string(home_team, sport=sport)
@@ -225,7 +246,8 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
                                    home_injuries=home_injuries, away_injuries=away_injuries,
                                    home_roster=home_roster, away_roster=away_roster,
                                    sport=sport, series_context=series_context,
-                                   starting_pitchers=starting_pitchers)
+                                   starting_pitchers=starting_pitchers,
+                                   weather=weather)
 
     our_home_prob = analysis["adjusted_home_prob"]
     our_away_prob = 1 - our_home_prob
@@ -291,6 +313,11 @@ def run_loop():
     odds_fetcher     = OddsFetcher(api_key=CONFIG.odds_api_key)
     nba_fetcher      = NBAStatsFetcher()
     espn_fetcher     = ESPNStatsFetcher()
+    mlb_fetcher      = MLBStatsFetcher()
+    nhl_fetcher      = NHLStatsFetcher()
+    nfl_fetcher      = NFLStatsFetcher()
+    wnba_fetcher     = WNBAStatsFetcher()
+    weather_fetcher  = WeatherFetcher()
     injury_fetcher   = InjuryFetcher()
     roster_fetcher   = RosterFetcher()
     results_fetcher  = ResultsFetcher()
@@ -344,7 +371,61 @@ def run_loop():
                 if sport == "basketball_nba" and nba_stats_df is None:
                     nba_stats_df = nba_fetcher.get_team_stats()
                 elif sport != "basketball_nba" and sport not in espn_stats_cache:
-                    espn_stats_cache[sport] = espn_fetcher.get_team_stats(sport)
+                    espn_df = espn_fetcher.get_team_stats(sport)
+                    if sport == "baseball_mlb":
+                        mlb_adv = mlb_fetcher.get_team_stats()
+                        if not mlb_adv.empty and not espn_df.empty:
+                            # Merge on full name first, fall back to nickname for relocated teams
+                            merged = espn_df.merge(mlb_adv, on="team", how="left")
+                            unmatched = merged["team_era"].isna()
+                            if unmatched.any():
+                                mlb_adv_nick = mlb_adv.copy()
+                                mlb_adv_nick["_nick"] = mlb_adv_nick["team"].str.split().str[-1]
+                                merged["_nick"] = merged["team"].str.split().str[-1]
+                                fallback = merged[unmatched][["team", "_nick"]].merge(
+                                    mlb_adv_nick.drop(columns="team"), on="_nick", how="left"
+                                )
+                                adv_cols = [c for c in mlb_adv.columns if c != "team"]
+                                for col in adv_cols:
+                                    merged.loc[unmatched, col] = fallback[col].values
+                            espn_df = merged.drop(columns=["_nick"], errors="ignore")
+                    elif sport == "americanfootball_nfl":
+                        nfl_adv = nfl_fetcher.get_team_stats()
+                        if not nfl_adv.empty and not espn_df.empty:
+                            merged = espn_df.merge(nfl_adv, on="team", how="left")
+                            unmatched = merged["pass_yards_pg"].isna()
+                            if unmatched.any():
+                                nfl_adv_nick = nfl_adv.copy()
+                                nfl_adv_nick["_nick"] = nfl_adv_nick["team"].str.split().str[-1]
+                                merged["_nick"] = merged["team"].str.split().str[-1]
+                                fallback = merged[unmatched][["team", "_nick"]].merge(
+                                    nfl_adv_nick.drop(columns="team"), on="_nick", how="left"
+                                )
+                                adv_cols = [c for c in nfl_adv.columns if c != "team"]
+                                for col in adv_cols:
+                                    merged.loc[unmatched, col] = fallback[col].values
+                            espn_df = merged.drop(columns=["_nick"], errors="ignore")
+                    elif sport == "icehockey_nhl":
+                        nhl_adv = nhl_fetcher.get_team_stats()
+                        if not nhl_adv.empty and not espn_df.empty:
+                            merged = espn_df.merge(nhl_adv, on="team", how="left")
+                            unmatched = merged["pp_pct"].isna()
+                            if unmatched.any():
+                                nhl_adv_nick = nhl_adv.copy()
+                                nhl_adv_nick["_nick"] = nhl_adv_nick["team"].str.split().str[-1]
+                                merged["_nick"] = merged["team"].str.split().str[-1]
+                                fallback = merged[unmatched][["team", "_nick"]].merge(
+                                    nhl_adv_nick.drop(columns="team"), on="_nick", how="left"
+                                )
+                                adv_cols = [c for c in nhl_adv.columns if c != "team"]
+                                for col in adv_cols:
+                                    merged.loc[unmatched, col] = fallback[col].values
+                            espn_df = merged.drop(columns=["_nick"], errors="ignore")
+                    elif sport == "basketball_wnba":
+                        wnba_adv = wnba_fetcher.get_team_stats()
+                        if not wnba_adv.empty and not espn_df.empty:
+                            espn_df = espn_df.merge(wnba_adv, on="team", how="left")
+                    espn_stats_cache[sport] = espn_df
 
             # 4. Evaluate games in analysis window
             for sport, game_raw in all_games_raw:
@@ -354,6 +435,9 @@ def run_loop():
                     nba_stats_df if sport == "basketball_nba" else None,
                     espn_stats_cache.get(sport),
                     engineer, claude, broker,
+                    nhl_fetcher=nhl_fetcher,
+                    nfl_fetcher=nfl_fetcher,
+                    weather_fetcher=weather_fetcher,
                 )
 
             # 5. Summary
