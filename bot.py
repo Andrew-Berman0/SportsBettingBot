@@ -239,7 +239,7 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     )
     logger.info(f"  Reasoning: {analysis['reasoning']}")
 
-    min_edge   = CONFIG.bankroll.min_edge
+    min_edge   = CONFIG.bankroll.min_edge_by_sport.get(sport, CONFIG.bankroll.min_edge)
     claude_rec = analysis["bet_recommendation"]
 
     stake = round(broker.bankroll * CONFIG.bankroll.flat_bet_pct, 2)
@@ -302,7 +302,11 @@ def run_loop():
     logger.info("=" * 60)
     logger.info("Sports Betting Bot started [PAPER MODE]")
     logger.info(f"Sports: {CONFIG.sports.sports}")
-    logger.info(f"Min edge: {CONFIG.bankroll.min_edge:.0%}  |  Flat bet: {CONFIG.bankroll.flat_bet_pct:.1%} of bankroll")
+    edge_summary = ", ".join(
+        f"{s.split('_')[1].upper()}: {e:.0%}"
+        for s, e in CONFIG.bankroll.min_edge_by_sport.items()
+    )
+    logger.info(f"Min edge: [{edge_summary}]  |  Flat bet: {CONFIG.bankroll.flat_bet_pct:.1%} of bankroll")
     logger.info("=" * 60)
 
     all_games_raw: list[tuple[str, dict]] = []

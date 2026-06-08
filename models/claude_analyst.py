@@ -17,6 +17,68 @@ import anthropic
 
 logger = logging.getLogger(__name__)
 
+# Sport-specific analyst personas injected at the top of every prompt.
+# Role shapes how Claude frames the problem; framework sets the priority order
+# for what actually drives outcomes in that sport.
+_ANALYST_PERSONAS: dict[str, dict[str, str]] = {
+    "basketball_nba": {
+        "role": "an expert NBA betting analyst who specializes in advanced team efficiency metrics",
+        "framework": (
+            "1. NET RATING is your primary lens — offensive and defensive efficiency matter more than raw record.\n"
+            "2. Weight the last 10 games heavily; momentum and form are real in the NBA.\n"
+            "3. Rest and back-to-backs are meaningful — a back-to-back team loses ~2-3% win probability.\n"
+            "4. In playoffs, home court and series pressure dominate; teams facing elimination often overperform.\n"
+            "5. Caution: in playoffs, current form matters more than regular-season record."
+        ),
+    },
+    "baseball_mlb": {
+        "role": "an expert MLB betting analyst who treats each game as a starting-pitcher matchup first and a team contest second",
+        "framework": (
+            "1. STARTING PITCHER ERA is the single most important factor — a 2.50 ERA vs a 5.00 ERA starter can shift the true line by 15-20% on its own.\n"
+            "2. Team win percentage is noisy over 162 games; run differential is a better signal of true team quality.\n"
+            "3. Home/road splits matter — factor in park effects and travel.\n"
+            "4. Do NOT overweight hot or cold streaks — regression to the mean is strong in baseball.\n"
+            "5. MLB books are highly efficient; be skeptical of any edge above 4-5% and lean toward 'pass' when uncertain.\n"
+            "6. Underdogs with an elite starter facing an average starter are the most consistently undervalued spot in baseball."
+        ),
+    },
+    "icehockey_nhl": {
+        "role": "an expert NHL betting analyst who evaluates goaltender matchups and special teams as the primary drivers of game outcomes",
+        "framework": (
+            "1. GOALTENDER performance is paramount — save percentage and goals-against average outweigh team record.\n"
+            "2. Special teams (power play %, penalty kill %) create consistent, repeatable edges.\n"
+            "3. In playoffs, home ice is strong (~58% home win rate); series pressure and elimination urgency are real.\n"
+            "4. Playoff hockey is defensive — fade high-scoring teams when they face disciplined, defensive opponents.\n"
+            "5. Short rest (back-to-back playoff games) significantly impacts goaltender performance."
+        ),
+    },
+    "basketball_wnba": {
+        "role": "an expert WNBA betting analyst who weights individual player impact heavily due to the league's smaller rosters",
+        "framework": (
+            "1. With only 11-12 active players, one star's absence can shift win probability by 10-15% — injury data is critical.\n"
+            "2. Home court advantage is smaller than the NBA (~53-55% home win rate); don't overweight it.\n"
+            "3. Point differential is the best efficiency signal — win percentage is volatile on a short schedule.\n"
+            "4. Travel fatigue is significant in the WNBA due to compressed scheduling.\n"
+            "5. Market efficiency is lower than NBA/MLB — genuine edges are more likely when roster news is fresh."
+        ),
+    },
+    "americanfootball_nfl": {
+        "role": "an expert NFL betting analyst who treats quarterback play and offensive line health as the foundation of every game evaluation",
+        "framework": (
+            "1. Starting QB quality is the single biggest factor — a backup QB shifts win probability by 10-15%.\n"
+            "2. Offensive line health determines both run efficiency and pass protection; it amplifies or limits the QB.\n"
+            "3. Weather is a major factor in outdoor stadiums — wind above 15 mph and rain suppress passing and scoring.\n"
+            "4. Home field is worth ~3 points; stronger in cold-weather outdoor venues.\n"
+            "5. The NFL market is the most efficient of all major sports — be very conservative about claiming edges and default to 'pass' when the data is thin."
+        ),
+    },
+}
+
+_DEFAULT_PERSONA = {
+    "role": "an expert sports betting analyst",
+    "framework": "Consider home field advantage, rest/fatigue, recent momentum, injury impact, and matchup style.",
+}
+
 
 class ClaudeAnalyst:
 
@@ -200,7 +262,12 @@ class ClaudeAnalyst:
             "reputation from your training data. Treat missing-data teams as unknown strength.\n"
         ) if missing else ""
 
-        return f"""You are an expert sports betting analyst. Analyze this upcoming game and provide a win probability estimate.
+        persona = _ANALYST_PERSONAS.get(sport, _DEFAULT_PERSONA)
+
+        return f"""You are {persona['role']}. Analyze this upcoming game and provide a win probability estimate.
+
+ANALYST FRAMEWORK FOR THIS SPORT:
+{persona['framework']}
 
 GAME: {away} @ {home}
 Sport: {sport}
@@ -227,7 +294,7 @@ AWAY TEAM ({away}):
 
 STATISTICAL MODEL ESTIMATE: {home} win probability = {base_prob:.1%}
 {missing_note}
-Based on this data, provide your analysis. Consider: home field advantage, rest/fatigue, recent momentum, injury impact, matchup style, series momentum and elimination pressure (if applicable), and any other relevant factors you know about these teams.
+Apply your framework above to this data and estimate win probability. Follow the priority order in the framework — don't treat all factors equally.
 
 CRITICAL PLAYER DATA RULE: Your reasoning may ONLY name specific players who appear in the roster or injury list provided above. Do NOT name any player from your training data who is not listed — rosters change constantly and your training data is stale. If a player you recall is not in the data above, they may have been traded, cut, or retired. Mentioning a player not in the provided data is a factual error. Base all player-specific claims strictly on the lists above.
 

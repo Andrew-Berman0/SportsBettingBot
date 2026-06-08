@@ -14,7 +14,14 @@ class SportsConfig:
 class BankrollConfig:
     starting_bankroll: float = 10000.0   # paper bankroll
     flat_bet_pct: float = 0.025          # 2.5% of current bankroll per bet
-    min_edge: float = 0.03               # only bet if edge > 3%
+    min_edge: float = 0.03               # fallback if sport not in min_edge_by_sport
+    min_edge_by_sport: dict = field(default_factory=lambda: {
+        "basketball_nba":       0.03,
+        "basketball_wnba":      0.03,
+        "americanfootball_nfl": 0.03,
+        "baseball_mlb":         0.03,
+        "icehockey_nhl":        0.03,
+    })
     max_open_bets: int = 5               # max simultaneous bets
     min_odds: float = -300               # avoid heavy favorites (implied > 75%)
 
