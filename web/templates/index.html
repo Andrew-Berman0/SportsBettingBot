@@ -88,6 +88,54 @@
 
   <main class="max-w-7xl mx-auto px-6 py-8 space-y-8">
 
+    <!-- ── CTA Banner ────────────────────────────────────────── -->
+    <div class="rounded-2xl border border-[#39FF1430] relative overflow-hidden"
+         style="background: linear-gradient(135deg, #39FF1408 0%, #0d1f0d 50%, #0a0a0a 100%);">
+      <div class="px-6 py-5 flex flex-col sm:flex-row sm:items-center gap-4">
+        <div class="flex-1">
+          <div class="flex items-center gap-2 mb-1.5">
+            <span class="relative flex h-2 w-2">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style="background:#39FF14"></span>
+              <span class="relative inline-flex rounded-full h-2 w-2" style="background:#39FF14"></span>
+            </span>
+            <span class="text-xs font-semibold tracking-widest uppercase" style="color:#39FF14">Live Picks</span>
+          </div>
+          <p class="text-white font-bold text-lg leading-snug">
+            AI moneyline picks, dropped before every game.
+          </p>
+          <p class="text-[#9ca3af] text-sm mt-1 leading-relaxed">
+            Claude analyzes the lines across <span class="text-white font-medium">NBA, NFL, MLB, NHL &amp; WNBA</span> and bets when it spots an edge.
+            See every pick and the full reasoning — <span class="text-white font-medium">2 hours before tip-off.</span> Draw your own conclusions.
+          </p>
+        </div>
+        <div class="shrink-0 text-center sm:text-right">
+          <p class="text-xs text-[#6b7280] mb-1">Free. No account required.</p>
+          <p class="text-xs font-medium mb-2" style="color:#39FF14">Come back before tip-off ↓</p>
+          <button onclick="bookmarkPage()" id="bookmark-btn"
+                  class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all"
+                  style="background:#39FF1412;color:#39FF14;border-color:#39FF1440;">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
+            </svg>
+            <span id="bookmark-label">Bookmark this page</span>
+          </button>
+        </div>
+      </div>
+    </div>
+    <script>
+      function bookmarkPage() {
+        if (navigator.share) {
+          navigator.share({ title: document.title, url: window.location.href })
+            .catch(() => {});
+        } else {
+          var key = navigator.platform && navigator.platform.toLowerCase().includes('mac') ? '⌘D' : 'Ctrl+D';
+          var label = document.getElementById('bookmark-label');
+          label.textContent = 'Press ' + key + ' to bookmark';
+          setTimeout(function() { label.textContent = 'Bookmark this page'; }, 3000);
+        }
+      }
+    </script>
+
     <!-- ── Explainer ─────────────────────────────────────────── -->
     <div class="rounded-2xl border border-[#2a2a2a] bg-[#111111] px-6 py-4 flex gap-3 items-start">
       <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color:#39FF14">
