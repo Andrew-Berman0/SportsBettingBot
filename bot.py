@@ -37,6 +37,7 @@ from SportsBettingBot.data.stats_fetcher import NBAStatsFetcher, ESPNStatsFetche
 from SportsBettingBot.data.injury_fetcher import InjuryFetcher
 from SportsBettingBot.data.roster_fetcher import RosterFetcher
 from SportsBettingBot.data.results_fetcher import ResultsFetcher
+from SportsBettingBot.data.outcome_tracker import OutcomeTracker
 from SportsBettingBot.features.engineer import FeatureEngineer
 from SportsBettingBot.models.claude_analyst import ClaudeAnalyst
 from SportsBettingBot.broker.paper_broker import PaperBroker
@@ -287,12 +288,13 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
 
 
 def run_loop():
-    odds_fetcher    = OddsFetcher(api_key=CONFIG.odds_api_key)
-    nba_fetcher     = NBAStatsFetcher()
-    espn_fetcher    = ESPNStatsFetcher()
-    injury_fetcher  = InjuryFetcher()
-    roster_fetcher  = RosterFetcher()
-    results_fetcher = ResultsFetcher()
+    odds_fetcher     = OddsFetcher(api_key=CONFIG.odds_api_key)
+    nba_fetcher      = NBAStatsFetcher()
+    espn_fetcher     = ESPNStatsFetcher()
+    injury_fetcher   = InjuryFetcher()
+    roster_fetcher   = RosterFetcher()
+    results_fetcher  = ResultsFetcher()
+    outcome_tracker  = OutcomeTracker(results_fetcher)
     engineer        = FeatureEngineer()
     claude          = ClaudeAnalyst(api_key=CONFIG.claude.api_key, model=CONFIG.claude.model)
     broker          = PaperBroker(starting_bankroll=CONFIG.bankroll.starting_bankroll)
@@ -310,12 +312,13 @@ def run_loop():
             now = datetime.now(timezone.utc)
             logger.info(f"--- Wake: {now.strftime('%Y-%m-%d %H:%M UTC')} ---")
 
-            # 1. Settle any completed bets
+            # 1. Settle any completed bets and log all game outcomes
             if broker.open_bets:
                 n_settled = results_fetcher.settle_open_bets(broker)
                 if n_settled:
                     logger.info(f"Auto-settled {n_settled} bet(s) from completed games.")
                     broker.export_training_data("training_data.csv")
+            outcome_tracker.update(broker)
 
             # 2. Fetch all sports (cache handles rate limiting; pre-game wake forces fresh call)
             all_games_raw = []
