@@ -10,7 +10,7 @@ On each wake:
   4. Sleep until the next meaningful event:
        - 2h before the next unevaluated game  (pre-game analysis)
        - 4h after tip-off for any open bet    (settlement check)
-       - 12:00 UTC daily                      (morning discovery refresh)
+       - midnight ET daily                    (morning discovery refresh)
 
 Run:
   python bot.py
@@ -20,6 +20,9 @@ import logging
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+_ET = ZoneInfo("America/New_York")
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -67,7 +70,7 @@ def _next_sleep_seconds(all_games_raw: list, broker: PaperBroker, now: datetime)
     Returns seconds until the next meaningful event:
       - 2h before the next unevaluated game
       - 4h after tip-off for any open bet (settlement check)
-      - 12:00 UTC the next day (morning discovery)
+      - midnight ET the next day (morning discovery)
     Minimum 5 minutes.
     """
     candidates: list[tuple[str, datetime]] = []
@@ -103,8 +106,10 @@ def _next_sleep_seconds(all_games_raw: list, broker: PaperBroker, now: datetime)
         except Exception:
             pass
 
-    # Daily morning refresh at 12:00 UTC
-    morning = now.replace(hour=12, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
+    # Daily morning refresh at midnight ET (start of new ET day)
+    now_et = now.astimezone(_ET)
+    morning = (now_et.replace(hour=0, minute=0, second=0, microsecond=0)
+               + timedelta(days=1)).astimezone(timezone.utc)
     if morning <= now + timedelta(minutes=5):
         morning += timedelta(days=1)
     candidates.append(("morning refresh", morning))

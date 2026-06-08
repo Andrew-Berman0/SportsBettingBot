@@ -186,6 +186,6 @@ async def index(request: Request):
             "pnl_colors":      json.dumps(pnl_colors),
             "passed_today":    passed_today,
             "today_label":     today_label,
-            "last_updated":    datetime.now(timezone.utc).strftime("%b %d, %Y %H:%M UTC"),
+            "last_updated":    datetime.now(ET).strftime("%b %d, %Y %-I:%M %p ET"),
         },
     )
