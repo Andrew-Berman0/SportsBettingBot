@@ -7,6 +7,11 @@
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="shortcut icon" href="/static/favicon.svg">
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <link rel="manifest" href="/static/manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="WWAID">
+  <meta name="theme-color" content="#0a0a0a">
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-RBSHC3ZLMP"></script>
   <script>
@@ -25,6 +30,17 @@
   <meta name="twitter:title"      content="WWAID — What Would AI Do?">
   <meta name="twitter:description" content="An AI-powered paper trading sports betting experiment. Watch Claude analyze games in real time.">
   <meta name="twitter:image"      content="https://wwaid.live/static/og-image.png">
+  <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+  <script>
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    OneSignalDeferred.push(async function(OneSignal) {
+      await OneSignal.init({
+        appId: "840e4cd4-054f-4f0c-96eb-d56c0f543ae9",
+        safari_web_id: "web.onesignal.auto.0d123f70-12e5-49b1-a758-f1abcc853120",
+        notifyButton: { enable: false },
+      });
+    });
+  </script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -110,15 +126,26 @@
         </div>
         <div class="shrink-0 text-center sm:text-right">
           <p class="text-xs text-[#6b7280] mb-1">Free. No account required.</p>
-          <p class="text-xs font-medium mb-2" style="color:#39FF14">Come back before tip-off ↓</p>
-          <button onclick="bookmarkPage()" id="bookmark-btn"
-                  class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all"
-                  style="background:#39FF1412;color:#39FF14;border-color:#39FF1440;">
-            <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
-            </svg>
-            <span id="bookmark-label">Bookmark this page</span>
-          </button>
+          <p class="text-xs font-medium mb-2" style="color:#39FF14">Never miss a pick ↓</p>
+          <div class="flex flex-col gap-2 items-end">
+            <button onclick="subscribePush()" id="push-btn"
+                    class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all w-full justify-center"
+                    style="background:#39FF1412;color:#39FF14;border-color:#39FF1440;">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6 6 0 10-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+              </svg>
+              <span id="push-label">Get pick notifications</span>
+            </button>
+            <p id="ios-hint" class="hidden text-[10px] text-[#6b7280] text-center leading-snug max-w-[160px]"></p>
+            <button onclick="bookmarkPage()" id="bookmark-btn"
+                    class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all w-full justify-center"
+                    style="background:#39FF1412;color:#39FF14;border-color:#39FF1440;">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
+              </svg>
+              <span id="bookmark-label">Bookmark this page</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -499,6 +526,23 @@
       </p>
     </div>
 
+    <!-- ── Privacy & Legal ───────────────────────────────────── -->
+    <div class="border-t border-[#1a1a1a] pt-6 pb-2 text-center space-y-3">
+      <p class="text-[#4b5563] text-xs leading-relaxed max-w-2xl mx-auto">
+        <span class="text-[#6b7280] font-medium">Privacy.</span>
+        This site uses Google Analytics to measure aggregate traffic. No personally identifiable information is collected or stored.
+        Push notifications are delivered via <a href="https://onesignal.com/privacy_policy" target="_blank" rel="noopener" class="underline hover:text-[#9ca3af]">OneSignal</a> —
+        your browser's push token is stored by OneSignal and is not accessible to us.
+        You can revoke notification permission at any time in your browser settings.
+      </p>
+      <p class="text-[#4b5563] text-xs leading-relaxed max-w-2xl mx-auto">
+        <span class="text-[#6b7280] font-medium">Not financial advice.</span>
+        All picks are simulated paper trades for research purposes only. Nothing on this site constitutes financial, gambling, or betting advice.
+        Do not make real-money decisions based on content from this site.
+      </p>
+      <p class="text-[#374151] text-xs mt-4">&copy; {{ 2026 }} WWAID. All rights reserved.</p>
+    </div>
+
   </main>
 
   <!-- ── Charts JS ──────────────────────────────────────────────── -->
@@ -570,6 +614,60 @@
       const row = document.getElementById(id);
       if (row) row.classList.toggle('open');
     }
+
+    // Web push subscription
+    const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+                || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const _isStandalone = window.navigator.standalone === true
+                       || window.matchMedia('(display-mode: standalone)').matches;
+
+    function setSubscribed() {
+      const btn   = document.getElementById('push-btn');
+      const label = document.getElementById('push-label');
+      if (label) label.textContent = 'Subscribed!';
+      if (btn) {
+        btn.style.background  = 'rgba(57,255,20,0.25)';
+        btn.style.borderColor = 'rgba(57,255,20,0.6)';
+        btn.style.cursor      = 'default';
+        btn.disabled          = true;
+      }
+    }
+
+    function _showIOSHint() {
+      const hint = document.getElementById('ios-hint');
+      const label = document.getElementById('push-label');
+      if (hint) {
+        hint.textContent = 'Tap the Share button then "Add to Home Screen". Open WWAID from your home screen to enable notifications.';
+        hint.classList.remove('hidden');
+      }
+      if (label) label.textContent = 'iPhone requires home screen app';
+    }
+
+    function subscribePush() {
+      if (_isIOS && !_isStandalone) { _showIOSHint(); return; }
+      window.OneSignalDeferred = window.OneSignalDeferred || [];
+      OneSignalDeferred.push(async function(OneSignal) {
+        const label = document.getElementById('push-label');
+        try {
+          if (Notification.permission === 'denied') {
+            if (_isIOS) { _showIOSHint(); return; }
+            label.textContent = 'Blocked — enable notifications in browser settings';
+            return;
+          }
+          if (Notification.permission === 'granted') { setSubscribed(); return; }
+          await OneSignal.Notifications.requestPermission();
+          if (Notification.permission === 'granted') setSubscribed();
+        } catch (e) {
+          label.textContent = 'Could not subscribe — try again';
+        }
+      });
+    }
+
+    // Reflect subscription state on page load
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    OneSignalDeferred.push(function() {
+      if (Notification.permission === 'granted') setSubscribed();
+    });
 
     // Today's evaluations dropdown
     function toggleEvals() {

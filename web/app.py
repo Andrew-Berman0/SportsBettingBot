@@ -6,6 +6,7 @@ Public dashboard for the AI paper-trading sports betting experiment.
 """
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -13,7 +14,7 @@ from zoneinfo import ZoneInfo
 ET = ZoneInfo("America/New_York")
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -103,6 +104,14 @@ def _prepare_bet(bet: dict) -> dict:
         as_ = b.get("away_score")
         b["score_str"] = f"{b['home_team']} {hs}, {b['away_team']} {as_}" if hs is not None else ""
     return b
+
+
+@app.get("/OneSignalSDKWorker.js")
+async def onesignal_worker():
+    return FileResponse(
+        Path(__file__).parent / "static" / "OneSignalSDKWorker.js",
+        media_type="application/javascript",
+    )
 
 
 @app.get("/google5a1c10f341626ed7.html", response_class=PlainTextResponse)

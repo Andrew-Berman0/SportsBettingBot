@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from SportsBettingBot.notifications.email_notifier import notify_bet_placed, notify_bet_settled
+from SportsBettingBot.notifications import push_notifier
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,7 @@ class PaperBroker:
             f"Stake: ${stake:.2f} | To win: ${bet['potential_payout'] - stake:.2f}"
         )
         notify_bet_placed(bet, self.bankroll)
+        push_notifier.notify_bet_placed(bet, self.bankroll)
         return bet
 
     def settle_bet(self, game_id: str, home_score: int, away_score: int, total: float | None = None):
