@@ -24,6 +24,7 @@ class PaperBroker:
         self.starting_bankroll = starting_bankroll
         self.bankroll   = starting_bankroll
         self.open_bets  = []   # list of bet dicts
+        self.upcoming_games: list[dict] = []  # today's scheduled games (refreshed each wake)
         self.closed_bets = []  # settled bets
         self.evaluated_game_ids: set[str] = set()  # games already analyzed — skip re-evaluation
         self.passed_games: list[dict] = []          # games evaluated but not bet on
@@ -257,6 +258,11 @@ class PaperBroker:
             return (home_score + away_score) < total
         return False
 
+    def set_upcoming_games(self, games: list[dict]) -> None:
+        """Replace today's upcoming games list and persist."""
+        self.upcoming_games = games
+        self._save()
+
     def _save(self):
         state = {
             "bankroll":            self.bankroll,
@@ -264,6 +270,7 @@ class PaperBroker:
             "closed_bets":         self.closed_bets,
             "evaluated_game_ids":  list(self.evaluated_game_ids),
             "passed_games":        self.passed_games,
+            "upcoming_games":      self.upcoming_games,
         }
         with open(STATE_FILE, "w") as f:
             json.dump(state, f, indent=2)
@@ -277,6 +284,7 @@ class PaperBroker:
             self.closed_bets        = state.get("closed_bets", [])
             self.evaluated_game_ids = set(state.get("evaluated_game_ids", []))
             self.passed_games       = state.get("passed_games", [])
+            self.upcoming_games     = state.get("upcoming_games", [])
             logger.info(
                 f"PaperBroker loaded — Bankroll: ${self.bankroll:,.2f} | "
                 f"Open: {len(self.open_bets)} | Closed: {len(self.closed_bets)}"

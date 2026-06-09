@@ -121,6 +121,49 @@
           </button>
         </div>
       </div>
+
+      {% if upcoming_games %}
+      <div class="border-t border-[#39FF1425]">
+        <button onclick="toggleEvals()" id="evals-toggle"
+                class="w-full px-6 py-3 flex items-center justify-between gap-3 transition-colors"
+                onmouseenter="this.style.background='rgba(57,255,20,0.03)'"
+                onmouseleave="this.style.background=''">
+          <span class="flex items-center gap-2 flex-wrap">
+            <span class="text-xs font-semibold uppercase tracking-wider" style="color:#39FF14">
+              {{ upcoming_games | length }} game{{ 's' if upcoming_games | length != 1 else '' }} on deck today
+            </span>
+            <span class="text-[#6b7280] text-xs">— see when Claude evaluates each one</span>
+          </span>
+          <svg id="evals-chevron" xmlns="http://www.w3.org/2000/svg"
+               class="w-4 h-4 shrink-0 transition-transform duration-200"
+               style="color:#39FF14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
+          </svg>
+        </button>
+
+        <div id="evals-panel" class="hidden px-6 pb-5">
+          <div>
+            {% for g in upcoming_games %}
+            <div class="flex items-center justify-between py-2.5
+                        {{ 'border-b border-[#39FF1415]' if not loop.last else '' }}">
+              <div class="flex items-center gap-2.5 min-w-0">
+                <span class="sport-pill sport-{{ g.sport_label | lower }} shrink-0">{{ g.sport_label }}</span>
+                <span class="text-white text-sm font-medium truncate">{{ g.matchup }}</span>
+              </div>
+              <div class="flex items-center gap-4 ml-4 shrink-0">
+                <span class="text-[#6b7280] text-xs">{{ g.game_time }}</span>
+                <span class="text-xs">
+                  <span class="text-[#6b7280]">eval </span>
+                  <span class="font-bold" style="color:#39FF14">{{ g.eval_time }}</span>
+                </span>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
     </div>
     <script>
       function bookmarkPage() {
@@ -526,6 +569,16 @@
     function toggleRow(id) {
       const row = document.getElementById(id);
       if (row) row.classList.toggle('open');
+    }
+
+    // Today's evaluations dropdown
+    function toggleEvals() {
+      const panel   = document.getElementById('evals-panel');
+      const chevron = document.getElementById('evals-chevron');
+      if (!panel) return;
+      const opening = panel.classList.contains('hidden');
+      panel.classList.toggle('hidden');
+      chevron.style.transform = opening ? 'rotate(180deg)' : '';
     }
 
     // ── Picks log: filtering + pagination ────────────────────────

@@ -105,6 +105,11 @@ def _next_sleep_seconds(all_games_raw: list, broker: PaperBroker, now: datetime)
             settle_at = start + timedelta(hours=4)
             if settle_at > now + timedelta(minutes=5):
                 candidates.append((f"settle {bet['away_team']} @ {bet['home_team']}", settle_at))
+            elif start < now:
+                # 4h check already passed but bet still open — game ran long or ESPN was delayed;
+                # retry every 45 minutes until settled
+                retry_at = now + timedelta(minutes=45)
+                candidates.append((f"retry-settle {bet['away_team']} @ {bet['home_team']}", retry_at))
         except Exception:
             pass
 
@@ -360,6 +365,29 @@ def run_loop():
 
             total_games = len(all_games_raw)
             logger.info(f"Upcoming games across all sports: {total_games}")
+
+            # Persist today's (ET) scheduled games for the dashboard dropdown
+            today_et = now.astimezone(_ET).date()
+            today_games = []
+            for _sport, _g in all_games_raw:
+                _ct = _g.get("commence_time", "")
+                if not _ct:
+                    continue
+                try:
+                    _game_et_date = datetime.fromisoformat(
+                        _ct.replace("Z", "+00:00")
+                    ).astimezone(_ET).date()
+                    if _game_et_date == today_et:
+                        today_games.append({
+                            "game_id":      _g.get("game_id", ""),
+                            "sport":        _sport,
+                            "home_team":    _g.get("home_team", ""),
+                            "away_team":    _g.get("away_team", ""),
+                            "commence_time": _ct,
+                        })
+                except Exception:
+                    pass
+            broker.set_upcoming_games(today_games)
 
             # 3. Pre-fetch stats for any sport with a game in the analysis window
             nba_stats_df = None

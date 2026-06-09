@@ -6,7 +6,7 @@ Public dashboard for the AI paper-trading sports betting experiment.
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -132,6 +132,36 @@ async def index(request: Request):
     passed_today.sort(key=lambda g: g.get("commence_time", ""))
     today_label = datetime.now(ET).strftime("%A, %B %-d")
 
+    # Games scheduled today that Claude has NOT yet evaluated — shown in CTA dropdown
+    evaluated_ids = (
+        set(state.get("evaluated_game_ids", []))
+        | {b["game_id"] for b in state["open_bets"]}
+        | {b["game_id"] for b in state["closed_bets"]}
+        | {g["game_id"] for g in state.get("passed_games", [])}
+    )
+    upcoming_games = []
+    for g in state.get("upcoming_games", []):
+        if g.get("game_id") in evaluated_ids:
+            continue
+        ct = g.get("commence_time", "")
+        try:
+            game_dt = datetime.fromisoformat(ct.replace("Z", "+00:00")).astimezone(ET)
+            game_time_str = game_dt.strftime("%-I:%M %p ET")
+            eval_dt = game_dt - timedelta(hours=2)
+            eval_time_str = eval_dt.strftime("%-I:%M %p ET")
+        except Exception:
+            game_time_str = ""
+            eval_time_str = ""
+        sport = g.get("sport", "")
+        upcoming_games.append({
+            "matchup":     f"{g.get('away_team', '')} @ {g.get('home_team', '')}",
+            "game_time":   game_time_str,
+            "eval_time":   eval_time_str,
+            "sport_label": SPORT_LABELS.get(sport, sport.upper()),
+            "commence_time": ct,
+        })
+    upcoming_games.sort(key=lambda g: g.get("commence_time", ""))
+
     # Overall stats
     total_staked = sum(b["stake"] for b in closed)
     total_pnl    = sum(b["pnl"] for b in closed)
@@ -189,6 +219,7 @@ async def index(request: Request):
             "pnl_colors":      json.dumps(pnl_colors),
             "passed_today":    passed_today,
             "today_label":     today_label,
+            "upcoming_games":  upcoming_games,
             "last_updated":    datetime.now(ET).strftime("%b %d, %Y %-I:%M %p ET"),
         },
     )
