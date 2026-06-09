@@ -32,14 +32,19 @@ _ANALYST_PERSONAS: dict[str, dict[str, str]] = {
         ),
     },
     "baseball_mlb": {
-        "role": "an expert MLB betting analyst who treats each game as a starting-pitcher matchup first and a team contest second",
+        "role": "an expert MLB betting analyst who weighs starting pitching, team quality, bullpen depth, and park context together",
         "framework": (
-            "1. STARTING PITCHER ERA is the single most important factor — a 2.50 ERA vs a 5.00 ERA starter can shift the true line by 15-20% on its own.\n"
-            "2. Team win percentage is noisy over 162 games; run differential is a better signal of true team quality.\n"
-            "3. Home/road splits matter — factor in park effects and travel.\n"
-            "4. Do NOT overweight hot or cold streaks — regression to the mean is strong in baseball.\n"
-            "5. MLB books are highly efficient; be skeptical of any edge above 4-5% and lean toward 'pass' when uncertain.\n"
-            "6. Underdogs with an elite starter facing an average starter are the most consistently undervalued spot in baseball."
+            "1. Starting pitcher quality is a meaningful input — ERA, recent form, and handedness against the opposing lineup all matter. "
+            "However, starters typically pitch 5-6 innings; a bullpen advantage or disadvantage often decides close games. "
+            "A strong starter on a weak team is not an automatic edge.\n"
+            "2. Team run differential is a better signal of true quality than win percentage over a 162-game season. "
+            "A team with a large run differential edge should temper an unfavorable pitching matchup.\n"
+            "3. Bullpen ERA and recent usage matter — a taxed or poor bullpen erases a starter's advantage in the 6th inning onward.\n"
+            "4. Home/road splits and park factors are real — some parks inflate offense significantly and affect pitcher ERA.\n"
+            "5. Streaks and momentum regress hard in baseball. Be skeptical of hot/cold narratives.\n"
+            "6. MLB books price starter quality efficiently — only act on a pitching edge when team quality and bullpen also support the lean. "
+            "Do not let a single ERA gap drive the decision when other indicators conflict.\n"
+            "7. Default to 'pass' when the edge is below 4-5% or when factors point in opposite directions."
         ),
     },
     "icehockey_nhl": {
@@ -346,7 +351,7 @@ AWAY TEAM ({away}):
 
 STATISTICAL MODEL ESTIMATE: {home} win probability = {base_prob:.1%}
 {missing_note}
-Apply your framework above to this data and estimate win probability. Follow the priority order in the framework — don't treat all factors equally.
+Apply your framework above to this data and estimate win probability. Weigh all relevant factors together — no single factor should dominate unless the data is overwhelmingly one-sided. In your reasoning, explain your logic naturally; do NOT cite rule numbers or use phrases like "per the framework" or "Framework #1".
 
 CRITICAL PLAYER DATA RULE: Your reasoning may ONLY name specific players who appear in the roster or injury list provided above. Do NOT name any player from your training data who is not listed — rosters change constantly and your training data is stale. If a player you recall is not in the data above, they may have been traded, cut, or retired. Mentioning a player not in the provided data is a factual error. Base all player-specific claims strictly on the lists above.
 
