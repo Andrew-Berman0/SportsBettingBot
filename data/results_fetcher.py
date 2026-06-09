@@ -157,19 +157,22 @@ class ResultsFetcher:
     @staticmethod
     def _result_date_matches(result_date: str, commence_time: str | None) -> bool:
         """
-        Returns True if the ESPN result date is within one day before (or after) the
-        bet's scheduled game date. The -1 day buffer handles games starting at midnight
-        UTC (e.g. 00:30 UTC = 8:30 PM ET the previous day) where ESPN records the
-        local-time date while commence_time is in UTC.
+        Returns True if the ESPN result date matches the game's calendar date in ET.
+        ESPN always records the local (ET) date, while commence_time is UTC, so we
+        convert before comparing. We also allow the next ET day to handle games that
+        run past midnight ET (e.g. extra innings, overtime).
         """
         if not commence_time:
             return True
         try:
-            normalized = commence_time
-            if "." in normalized:
-                normalized = normalized[:normalized.index(".")] + normalized[normalized.rindex("Z"):]
-            game_dt = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
-            earliest = (game_dt - timedelta(days=1)).strftime("%Y-%m-%d")
-            return result_date >= earliest
+            from zoneinfo import ZoneInfo
+            ET = ZoneInfo("America/New_York")
+            game_dt = datetime.fromisoformat(commence_time.replace("Z", "+00:00"))
+            game_et_date = game_dt.astimezone(ET).date()
+            next_et_date = game_et_date + timedelta(days=1)
+            return result_date in (
+                game_et_date.strftime("%Y-%m-%d"),
+                next_et_date.strftime("%Y-%m-%d"),
+            )
         except Exception:
             return True
