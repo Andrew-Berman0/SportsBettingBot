@@ -67,6 +67,19 @@ _ANALYST_PERSONAS: dict[str, dict[str, str]] = {
             "5. Market efficiency is lower than NBA/MLB — genuine edges are more likely when roster news is fresh."
         ),
     },
+    "soccer_fifa_world_cup": {
+        "role": "an expert FIFA World Cup betting analyst who combines team quality, recent international form, and tournament context",
+        "framework": (
+            "1. Recent international form (last 5 games) is your primary momentum signal — tournament pedigree and FIFA ranking set the baseline, but current form matters more.\n"
+            "2. This is a 3-way market. Your adjusted_home_prob = P(home wins). A home ML bet LOSES on a draw. Draw probability in World Cup group stage is ~25% — a marginal favorite may not offer value once draw probability is accounted for.\n"
+            "3. Host nation advantage is real: Mexico, USA, and Canada receive significant home crowd support in their respective venues — treat this as a meaningful boost beyond normal home advantage.\n"
+            "4. Tournament stage context: teams facing elimination play with urgency; teams already qualified for the knockout round may rotate key players — factor this into your assessment when group standings are available.\n"
+            "5. Tactical matchups matter in international soccer — a disciplined counter-attacking side vs a high-press possession team can produce a result that surprises pure quality rankings.\n"
+            "6. Player absences from injury data are decisive in soccer — a missing striker, goalkeeper, or holding midfielder can shift win probability by 5-10%.\n"
+            "7. Suspension data is unavailable — if you strongly suspect a key player is suspended (e.g., yellow card accumulation), flag this uncertainty in your reasoning but do not treat it as confirmed.\n"
+            "8. World Cup markets are among the most efficient in sports. Default to 'pass' unless multiple factors align and the edge exceeds 4-5%."
+        ),
+    },
     "americanfootball_nfl": {
         "role": "an expert NFL betting analyst who treats quarterback play and offensive line health as the foundation of every game evaluation",
         "framework": (
@@ -167,12 +180,17 @@ class ClaudeAnalyst:
             )
 
         def build_record(stats: dict) -> str:
-            w = stats.get("W") or stats.get("wins")
-            l = stats.get("L") or stats.get("losses")
+            w   = stats.get("W") or stats.get("wins")
+            l   = stats.get("L") or stats.get("losses")
             otl = stats.get("otLosses") or stats.get("OTL")
+            ties = stats.get("ties")
             if w is None and l is None:
                 return "?-?"
-            record = f"{int(w) if w is not None else '?'}-{int(l) if l is not None else '?'}"
+            w_str = int(w) if w is not None else "?"
+            l_str = int(l) if l is not None else "?"
+            if ties is not None:
+                return f"{w_str}-{int(ties)}-{l_str}"
+            record = f"{w_str}-{l_str}"
             if otl is not None:
                 record += f"-{int(otl)}"
             return record
@@ -282,6 +300,24 @@ class ClaudeAnalyst:
                     f"- Offensive EPA/play: {_stat(stats, 'off_epa_per_play', fmt=_dec2)} | Defensive EPA allowed/play: {_stat(stats, 'def_epa_allowed_per_play', fmt=_dec2)}",
                     f"- Rest days: {_stat(stats, 'rest_days')}",
                     f"- Streak: {_stat(stats, 'streak')}",
+                ])
+            if sport == "soccer_fifa_world_cup":
+                form = stats.get("form", "N/A")
+                w    = int(stats.get("wins", 0) or 0)
+                d    = int(stats.get("ties", 0) or 0)
+                l    = int(stats.get("losses", 0) or 0)
+                pts  = int(stats.get("points", 0) or 0)
+                gf   = int(stats.get("goals_for", 0) or 0)
+                ga   = int(stats.get("goals_against", 0) or 0)
+                gd   = int(stats.get("goal_diff", 0) or 0)
+                rank = stats.get("fifa_rank")
+                gd_str   = f"+{gd}" if gd >= 0 else str(gd)
+                rank_str = f"#{int(rank)}" if rank else "N/A"
+                return "\n".join([
+                    f"- Form (last 5 intl): {form}",
+                    f"- Tournament record: {w}W-{d}D-{l}L ({pts} pts)",
+                    f"- Goals: {gf} for, {ga} against (GD: {gd_str})",
+                    f"- FIFA ranking: {rank_str}",
                 ])
             return "- Stats: Not available"
 

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 @dataclass
 class SportsConfig:
-    sports: list = field(default_factory=lambda: ["basketball_nba", "basketball_wnba", "americanfootball_nfl", "baseball_mlb", "icehockey_nhl"])
+    sports: list = field(default_factory=lambda: ["basketball_nba", "basketball_wnba", "americanfootball_nfl", "baseball_mlb", "icehockey_nhl", "soccer_fifa_world_cup"])
     primary_sport: str = "basketball_nba"
     bet_types: list = field(default_factory=lambda: ["h2h", "totals"])  # moneyline + over/under
     bookmakers: list = field(default_factory=lambda: ["fanduel", "draftkings", "betmgm"])
@@ -16,11 +16,12 @@ class BankrollConfig:
     flat_bet_pct: float = 0.025          # 2.5% of current bankroll per bet
     min_edge: float = 0.03               # fallback if sport not in min_edge_by_sport
     min_edge_by_sport: dict = field(default_factory=lambda: {
-        "basketball_nba":       0.03,
-        "basketball_wnba":      0.03,
-        "americanfootball_nfl": 0.03,
-        "baseball_mlb":         0.03,
-        "icehockey_nhl":        0.03,
+        "basketball_nba":        0.03,
+        "basketball_wnba":       0.03,
+        "americanfootball_nfl":  0.03,
+        "baseball_mlb":          0.03,
+        "icehockey_nhl":         0.03,
+        "soccer_fifa_world_cup": 0.04,
     })
     max_open_bets: int = 15              # max simultaneous bets
     min_odds: float = -300               # avoid heavy favorites (implied > 75%)

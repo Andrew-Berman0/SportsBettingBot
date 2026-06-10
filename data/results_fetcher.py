@@ -15,11 +15,12 @@ import requests
 logger = logging.getLogger(__name__)
 
 SPORT_ESPN_MAP = {
-    "basketball_nba":       ("basketball", "nba"),
-    "basketball_wnba":      ("basketball", "wnba"),
-    "baseball_mlb":         ("baseball",   "mlb"),
-    "icehockey_nhl":        ("hockey",     "nhl"),
-    "americanfootball_nfl": ("football",   "nfl"),
+    "basketball_nba":        ("basketball", "nba"),
+    "basketball_wnba":       ("basketball", "wnba"),
+    "baseball_mlb":          ("baseball",   "mlb"),
+    "icehockey_nhl":         ("hockey",     "nhl"),
+    "americanfootball_nfl":  ("football",   "nfl"),
+    "soccer_fifa_world_cup": ("soccer",     "fifa.world"),
 }
 
 

@@ -33,6 +33,7 @@ sys.path.insert(0, str(_here if (_here / "SportsBettingBot").is_dir() else _here
 
 from SportsBettingBot.config import CONFIG
 from SportsBettingBot.data.odds_fetcher import OddsFetcher
+from SportsBettingBot.data.world_cup_fetcher import WorldCupFetcher
 from SportsBettingBot.data.stats_fetcher import NBAStatsFetcher, ESPNStatsFetcher, MLBStatsFetcher, NHLStatsFetcher, WNBAStatsFetcher, NFLStatsFetcher
 from SportsBettingBot.data.weather_fetcher import WeatherFetcher
 from SportsBettingBot.data.injury_fetcher import InjuryFetcher
@@ -163,7 +164,8 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
                   broker: PaperBroker,
                   nhl_fetcher: NHLStatsFetcher | None = None,
                   nfl_fetcher: NFLStatsFetcher | None = None,
-                  weather_fetcher: WeatherFetcher | None = None) -> None:
+                  weather_fetcher: WeatherFetcher | None = None,
+                  world_cup_fetcher: WorldCupFetcher | None = None) -> None:
     """Run the full analysis pipeline for a single game and place a bet if value found."""
     game = game_raw if game_raw.get("_pre_parsed") else OddsFetcher.parse_game(game_raw)
     if not game:
@@ -222,10 +224,16 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
                 label = "dome" if weather.get("is_dome") else f"{weather.get('temp')}°F, {weather.get('wind_speed')} mph wind"
                 logger.info(f"  Weather: {label}")
 
-    home_injuries = injury_fetcher.get_team_injuries(home_team, sport=sport, max_age_minutes=30)
-    away_injuries = injury_fetcher.get_team_injuries(away_team, sport=sport, max_age_minutes=30)
-    home_roster   = roster_fetcher.get_roster_string(home_team, sport=sport)
-    away_roster   = roster_fetcher.get_roster_string(away_team, sport=sport)
+    if sport == "soccer_fifa_world_cup" and world_cup_fetcher:
+        home_injuries, home_roster = world_cup_fetcher.get_team_roster_and_injuries(home_team)
+        away_injuries, away_roster = world_cup_fetcher.get_team_roster_and_injuries(away_team)
+        home_stats["form"] = game.get("home_form", "")
+        away_stats["form"] = game.get("away_form", "")
+    else:
+        home_injuries = injury_fetcher.get_team_injuries(home_team, sport=sport, max_age_minutes=30)
+        away_injuries = injury_fetcher.get_team_injuries(away_team, sport=sport, max_age_minutes=30)
+        home_roster   = roster_fetcher.get_roster_string(home_team, sport=sport)
+        away_roster   = roster_fetcher.get_roster_string(away_team, sport=sport)
     if home_injuries or away_injuries:
         logger.info(f"  Injuries — {home_team}: {len(home_injuries)} | {away_team}: {len(away_injuries)}")
 
@@ -236,10 +244,15 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
 
     base_home_prob = book_home_prob
 
-    # Fetch playoff series context for NBA and NHL so Claude knows the series score
+    # Series / group context for Claude
     series_context = None
     if sport in ("basketball_nba", "icehockey_nhl"):
         series_context = espn_fetcher.get_series_context(sport, home_team, away_team)
+    elif sport == "soccer_fifa_world_cup" and world_cup_fetcher:
+        series_context = world_cup_fetcher.get_group_context(
+            game["game_id"], home_team, away_team,
+            game.get("draw_ml"), game.get("draw_implied", 0.0),
+        )
 
     # Fetch probable starting pitchers for MLB — biggest single factor in game outcome
     starting_pitchers = {}
@@ -316,6 +329,7 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
 
 def run_loop():
     odds_fetcher     = OddsFetcher(api_key=CONFIG.odds_api_key)
+    world_cup_fetcher = WorldCupFetcher()
     nba_fetcher      = NBAStatsFetcher()
     espn_fetcher     = ESPNStatsFetcher()
     mlb_fetcher      = MLBStatsFetcher()
@@ -359,7 +373,10 @@ def run_loop():
             # 2. Fetch all sports (cache handles rate limiting; pre-game wake forces fresh call)
             all_games_raw = []
             for sport in CONFIG.sports.sports:
-                games = odds_fetcher.get_upcoming_games(sport, CONFIG.sports.bookmakers)
+                if sport == "soccer_fifa_world_cup":
+                    games = world_cup_fetcher.get_upcoming_games()
+                else:
+                    games = odds_fetcher.get_upcoming_games(sport, CONFIG.sports.bookmakers)
                 for g in games:
                     all_games_raw.append((sport, g))
 
@@ -398,6 +415,8 @@ def run_loop():
                     continue
                 if sport == "basketball_nba" and nba_stats_df is None:
                     nba_stats_df = nba_fetcher.get_team_stats()
+                elif sport == "soccer_fifa_world_cup" and sport not in espn_stats_cache:
+                    espn_stats_cache[sport] = world_cup_fetcher.get_team_stats()
                 elif sport != "basketball_nba" and sport not in espn_stats_cache:
                     espn_df = espn_fetcher.get_team_stats(sport)
                     if sport == "baseball_mlb":
@@ -466,6 +485,7 @@ def run_loop():
                     nhl_fetcher=nhl_fetcher,
                     nfl_fetcher=nfl_fetcher,
                     weather_fetcher=weather_fetcher,
+                    world_cup_fetcher=world_cup_fetcher,
                 )
 
             # 5. Summary
