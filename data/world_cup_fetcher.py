@@ -200,7 +200,6 @@ class WorldCupFetcher:
                             "goals_against": stat_map.get("pointsAgainst", 0),
                             "goal_diff":     stat_map.get("pointDifferential", 0),
                             "points":        stat_map.get("points", 0),
-                            "fifa_rank":     stat_map.get("rank"),
                         })
             return pd.DataFrame(rows) if rows else pd.DataFrame()
         except Exception as e:

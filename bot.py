@@ -268,7 +268,15 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
                                    weather=weather)
 
     our_home_prob = analysis["adjusted_home_prob"]
-    our_away_prob = 1 - our_home_prob
+    # In a 3-way market (soccer), the draw is a separate outcome an ML bet loses on.
+    # Claude returns only P(home win), so 1 - P(home) would fold the entire draw mass
+    # into the away side and fabricate an away edge. Hold the market's no-vig draw
+    # probability fixed and give the away side the remainder.
+    if sport == "soccer_fifa_world_cup":
+        draw_prob = game.get("draw_implied", 0.0)
+        our_away_prob = max(0.0, 1 - our_home_prob - draw_prob)
+    else:
+        our_away_prob = 1 - our_home_prob
     home_edge = our_home_prob - book_home_prob
     away_edge = our_away_prob - book_away_prob
 

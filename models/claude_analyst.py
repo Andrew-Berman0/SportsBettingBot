@@ -70,9 +70,9 @@ _ANALYST_PERSONAS: dict[str, dict[str, str]] = {
     "soccer_fifa_world_cup": {
         "role": "an expert FIFA World Cup betting analyst who combines team quality, recent international form, and tournament context",
         "framework": (
-            "1. Recent international form (last 5 games) is your primary momentum signal — tournament pedigree and FIFA ranking set the baseline, but current form matters more.\n"
+            "1. Recent international form (last 5 games) is your primary momentum signal, alongside tournament record and goal difference once group games have been played — current form and results matter more than reputation. You are NOT given a reliable FIFA world ranking, so do not invent one or lean on remembered rankings from your training data.\n"
             "2. This is a 3-way market. Your adjusted_home_prob = P(home wins). A home ML bet LOSES on a draw. Draw probability in World Cup group stage is ~25% — a marginal favorite may not offer value once draw probability is accounted for.\n"
-            "3. Host nation advantage is real: Mexico, USA, and Canada receive significant home crowd support in their respective venues — treat this as a meaningful boost beyond normal home advantage.\n"
+            "3. Home/away here is mostly nominal: the great majority of group-stage matches are played at NEUTRAL venues, so the 'home' label carries little or no true home-field advantage. The exception is the host nations (Mexico, USA, Canada): when one of them is playing inside its own country, treat it as a real and meaningful home-crowd boost. Use the Venue line to judge whether the home team is actually playing at home before applying any home advantage.\n"
             "4. Tournament stage context: teams facing elimination play with urgency; teams already qualified for the knockout round may rotate key players — factor this into your assessment when group standings are available.\n"
             "5. Tactical matchups matter in international soccer — a disciplined counter-attacking side vs a high-press possession team can produce a result that surprises pure quality rankings.\n"
             "6. Player absences from injury data are decisive in soccer — a missing striker, goalkeeper, or holding midfielder can shift win probability by 5-10%.\n"
@@ -310,14 +310,11 @@ class ClaudeAnalyst:
                 gf   = int(stats.get("goals_for", 0) or 0)
                 ga   = int(stats.get("goals_against", 0) or 0)
                 gd   = int(stats.get("goal_diff", 0) or 0)
-                rank = stats.get("fifa_rank")
                 gd_str   = f"+{gd}" if gd >= 0 else str(gd)
-                rank_str = f"#{int(rank)}" if rank else "N/A"
                 return "\n".join([
                     f"- Form (last 5 intl): {form}",
                     f"- Tournament record: {w}W-{d}D-{l}L ({pts} pts)",
                     f"- Goals: {gf} for, {ga} against (GD: {gd_str})",
-                    f"- FIFA ranking: {rank_str}",
                 ])
             return "- Stats: Not available"
 
@@ -357,6 +354,8 @@ class ClaudeAnalyst:
 
         persona = _ANALYST_PERSONAS.get(sport, _DEFAULT_PERSONA)
 
+        venue_line = f"\nVenue: {game['venue']}" if game.get("venue") else ""
+
         return f"""You are {persona['role']}. Analyze this upcoming game and provide a win probability estimate.
 
 ANALYST FRAMEWORK FOR THIS SPORT:
@@ -364,7 +363,7 @@ ANALYST FRAMEWORK FOR THIS SPORT:
 
 GAME: {away} @ {home}
 Sport: {sport}
-Commence: {game.get('commence_time', 'Unknown')}
+Commence: {game.get('commence_time', 'Unknown')}{venue_line}
 
 ODDS:
 - {home} moneyline: {game.get('home_ml', 'N/A')} (implied: {game.get('home_implied', 0):.1%})
