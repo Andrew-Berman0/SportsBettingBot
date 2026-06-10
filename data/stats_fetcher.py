@@ -183,10 +183,13 @@ class ESPNStatsFetcher:
     _SCOREBOARD_BASE = "https://site.api.espn.com/apis/site/v2/sports"
     _SERIES_CACHE_TTL = 4 * 3600  # seconds
 
+    _CORE_BASE = "https://sports.core.api.espn.com/v2/sports"
+
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "Mozilla/5.0"})
         self._series_cache: dict = {}  # {(sport_key, home_nick, away_nick): (ts, str|None)}
+        self._throws_cache: dict = {}  # {athlete_id: "L"|"R"|None}
 
     def get_team_stats(self, sport_key: str) -> pd.DataFrame:
         """Returns basic team stats (win%, point diff) for the given sport."""
@@ -318,6 +321,9 @@ class ESPNStatsFetcher:
                                         "era":    stats.get("ERA", "?"),
                                         "wins":   stats.get("W", "?"),
                                         "losses": stats.get("L", "?"),
+                                        "throws": self._fetch_pitcher_throws(
+                                            p.get("athlete", {}).get("id")
+                                        ),
                                     }
                                 else:
                                     result[side] = {"name": "TBD", "record": "", "era": "?"}
@@ -330,6 +336,28 @@ class ESPNStatsFetcher:
             except Exception as e:
                 logger.debug(f"Starting pitcher fetch error: {e}")
         return {}
+
+    def _fetch_pitcher_throws(self, athlete_id) -> str | None:
+        """Returns 'L' or 'R' (pitching hand) for an ESPN athlete id, or None.
+        Cached in memory since handedness never changes within a run."""
+        if not athlete_id:
+            return None
+        aid = str(athlete_id)
+        if aid in self._throws_cache:
+            return self._throws_cache[aid]
+        hand = None
+        try:
+            r = self.session.get(
+                f"{self._CORE_BASE}/baseball/leagues/mlb/athletes/{aid}", timeout=10
+            )
+            r.raise_for_status()
+            abbr = r.json().get("throws", {}).get("abbreviation")
+            if abbr in ("L", "R"):
+                hand = abbr
+        except Exception as e:
+            logger.debug(f"Pitcher handedness fetch error ({aid}): {e}")
+        self._throws_cache[aid] = hand
+        return hand
 
 
 class NHLStatsFetcher:

@@ -34,13 +34,14 @@ _ANALYST_PERSONAS: dict[str, dict[str, str]] = {
     "baseball_mlb": {
         "role": "an expert MLB betting analyst who weighs starting pitching, team quality, bullpen depth, and park context together",
         "framework": (
-            "1. Starting pitcher quality is a meaningful input — ERA, recent form, and handedness against the opposing lineup all matter. "
+            "1. Starting pitcher quality is a meaningful input — weigh season ERA and the team's overall pitching numbers. "
+            "The pitcher's throwing hand is given (LHP/RHP); a platoon mismatch can matter, but you are NOT given the opposing lineup's splits vs left/right, so treat handedness as a light factor, not a decisive one. "
             "However, starters typically pitch 5-6 innings; a bullpen advantage or disadvantage often decides close games. "
             "A strong starter on a weak team is not an automatic edge.\n"
             "2. Team run differential is a better signal of true quality than win percentage over a 162-game season. "
             "A team with a large run differential edge should temper an unfavorable pitching matchup.\n"
-            "3. Bullpen ERA and recent usage matter — a taxed or poor bullpen erases a starter's advantage in the 6th inning onward.\n"
-            "4. Home/road splits and park factors are real — some parks inflate offense significantly and affect pitcher ERA.\n"
+            "3. Bullpen ERA matters — a poor bullpen erases a starter's advantage in the 6th inning onward. Only season-long bullpen ERA is provided, not recent usage, so you cannot tell if a bullpen is currently taxed — do not speculate about fatigue you can't see.\n"
+            "4. Home/road splits are real — use the Home and Road win-loss records provided. Park factors also affect scoring, but no venue or park data is provided here, so do not apply park adjustments from memory.\n"
             "5. Streaks and momentum regress hard in baseball. Be skeptical of hot/cold narratives.\n"
             "6. MLB books price starter quality efficiently — only act on a pitching edge when team quality and bullpen also support the lean. "
             "Do not let a single ERA gap drive the decision when other indicators conflict.\n"
@@ -130,7 +131,7 @@ class ClaudeAnalyst:
                 "adjusted_home_prob": float,
                 "confidence":         str,   # "low" | "medium" | "high"
                 "reasoning":          str,
-                "bet_recommendation": str,   # "home_ml" | "away_ml" | "over" | "under" | "pass"
+                "bet_recommendation": str,   # "home_ml" | "away_ml" | "pass"
             }
         """
         prompt = self._build_prompt(game, home_stats, away_stats, base_home_prob,
@@ -222,10 +223,12 @@ class ClaudeAnalyst:
             if sport == "baseball_mlb":
                 sp = starting_pitchers or {}
                 pitcher = sp.get(side, {})
+                throws = pitcher.get("throws")
+                hand_str = f", {throws}HP" if throws in ("L", "R") else ""
                 pitcher_line = (
                     f"- Starting pitcher: {pitcher['name']} "
                     f"({pitcher.get('wins','?')}-{pitcher.get('losses','?')}, "
-                    f"{pitcher.get('era','?')} ERA)"
+                    f"{pitcher.get('era','?')} ERA{hand_str})"
                     if pitcher.get("name") and pitcher["name"] != "TBD"
                     else "- Starting pitcher: TBD"
                 )
@@ -395,7 +398,7 @@ Respond ONLY with valid JSON in this exact format:
   "adjusted_home_prob": <float between 0 and 1>,
   "confidence": "<low|medium|high>",
   "reasoning": "<2-3 sentences explaining your adjustment>",
-  "bet_recommendation": "<home_ml|away_ml|over|under|pass>"
+  "bet_recommendation": "<home_ml|away_ml|pass>"
 }}"""
 
     def _parse_response(self, raw: str, fallback_prob: float) -> dict:
