@@ -154,6 +154,11 @@ async def index(request: Request):
             continue
         ct = g.get("commence_time", "")
         try:
+            if datetime.fromisoformat(ct.replace("Z", "+00:00")) < datetime.now(timezone.utc):
+                continue
+        except Exception:
+            pass
+        try:
             game_dt = datetime.fromisoformat(ct.replace("Z", "+00:00")).astimezone(ET)
             game_time_str = game_dt.strftime("%-I:%M %p ET")
             eval_dt = game_dt - timedelta(hours=2)

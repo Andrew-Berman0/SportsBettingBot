@@ -22,7 +22,7 @@ class BankrollConfig:
         "baseball_mlb":         0.03,
         "icehockey_nhl":        0.03,
     })
-    max_open_bets: int = 5               # max simultaneous bets
+    max_open_bets: int = 15              # max simultaneous bets
     min_odds: float = -300               # avoid heavy favorites (implied > 75%)
 
 
