@@ -97,17 +97,35 @@ class NBAStatsFetcher:
         if not self._available:
             return {}
 
-        try:
-            time.sleep(0.6)
-            logs = self._teamgamelogs.TeamGameLogs(
-                team_id_nullable=team_id,
-                season_nullable=season,
-                last_n_games_nullable=n_games,
-            )
-            df = logs.get_data_frames()[0]
-            if df.empty:
-                return {}
+        # During the NBA playoff window, prefer playoff game logs so "recent form"
+        # reflects the actual postseason run rather than stale regular-season games
+        # (which ended in April). Fall back to regular season if the team has no
+        # playoff games yet (e.g. play-in or eliminated teams).
+        today = datetime.today()
+        in_playoffs = (today.month == 4 and today.day >= 12) or today.month in (5, 6)
+        season_types = ["Playoffs", "Regular Season"] if in_playoffs else ["Regular Season"]
 
+        df = None
+        for season_type in season_types:
+            try:
+                time.sleep(0.6)
+                logs = self._teamgamelogs.TeamGameLogs(
+                    team_id_nullable=team_id,
+                    season_nullable=season,
+                    season_type_nullable=season_type,
+                    last_n_games_nullable=n_games,
+                )
+                d = logs.get_data_frames()[0]
+                if not d.empty:
+                    df = d
+                    break
+            except Exception as e:
+                logger.warning(f"Recent form fetch error (team {team_id}, {season_type}): {e}")
+
+        if df is None or df.empty:
+            return {}
+
+        try:
             df = df.sort_values("GAME_DATE", ascending=False).head(n_games)
             wins_l10  = (df["WL"] == "W").sum()
             wins_l5   = (df.head(5)["WL"] == "W").sum()
@@ -127,7 +145,7 @@ class NBAStatsFetcher:
                 "rest_days":       rest_days,
             }
         except Exception as e:
-            logger.warning(f"Recent form fetch error (team {team_id}): {e}")
+            logger.warning(f"Recent form compute error (team {team_id}): {e}")
             return {}
 
     def get_team_id(self, team_name: str) -> int | None:

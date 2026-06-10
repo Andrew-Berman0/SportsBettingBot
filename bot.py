@@ -347,9 +347,11 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
 
     base_home_prob = book_home_prob
 
-    # Series / group context for Claude
+    # Series / group context for Claude. NBA/NHL/MLB/WNBA all decide playoff rounds
+    # by series, so feed Claude the current series standing (e.g. "leads series 2-1").
+    # Returns None for regular-season games, so it is safe to call year-round.
     series_context = None
-    if sport in ("basketball_nba", "icehockey_nhl"):
+    if sport in ("basketball_nba", "icehockey_nhl", "baseball_mlb", "basketball_wnba"):
         series_context = espn_fetcher.get_series_context(sport, home_team, away_team)
     elif sport == "soccer_fifa_world_cup" and world_cup_fetcher:
         series_context = world_cup_fetcher.get_group_context(
