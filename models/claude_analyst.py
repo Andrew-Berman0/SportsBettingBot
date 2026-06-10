@@ -65,7 +65,7 @@ _ANALYST_PERSONAS: dict[str, dict[str, str]] = {
             "1. With only 11-12 active players, one star's absence can shift win probability by 10-15% — injury data is critical.\n"
             "2. Home court advantage is smaller than the NBA (~53-55% home win rate); don't overweight it.\n"
             "3. Point differential is the best efficiency signal — win percentage is volatile on a short schedule.\n"
-            "4. Travel fatigue is significant in the WNBA due to compressed scheduling.\n"
+            "4. Rest matters in the WNBA's compressed schedule — use the Rest days value; a team on 0-1 days rest (a back-to-back or close to it) is at a real disadvantage worth a few points of win probability.\n"
             "5. Market efficiency is lower than NBA/MLB — genuine edges are more likely when roster news is fresh."
         ),
     },
@@ -283,16 +283,25 @@ class ClaudeAnalyst:
             if sport == "basketball_wnba":
                 _dec2 = lambda v: f"{v:.2f}"
                 _pct1 = lambda v: f"{v:.1f}%"
+                streak_raw = stats.get("streak")
+                try:
+                    sv = int(float(streak_raw))
+                    streak_str = f"W{sv}" if sv >= 0 else f"L{abs(sv)}"
+                except (TypeError, ValueError):
+                    streak_str = "N/A"
                 return "\n".join([
                     f"- Win %: {_stat(stats, 'winPercent', fmt=lambda v: f'{v:.1%}')}",
                     f"- Points/game (for): {_stat(stats, 'avgPointsFor', 'pointsFor', fmt=lambda v: f'{v:.1f}')}",
                     f"- Points/game (against): {_stat(stats, 'avgPointsAgainst', 'pointsAgainst', fmt=lambda v: f'{v:.1f}')}",
                     f"- Point differential: {_stat(stats, 'differential', 'pointDifferential', fmt=_dec2)}",
+                    f"- Home: {_stat(stats, 'Home')} | Road: {_stat(stats, 'Road')}",
+                    f"- Last 10: {_stat(stats, 'Last Ten Games')}",
                     f"- Shooting: FG {_stat(stats, 'fg_pct', fmt=_pct1)} | 3PT {_stat(stats, 'three_pct', fmt=_pct1)}",
                     f"- Ball control: A/TO ratio {_stat(stats, 'ast_to_ratio', fmt=_dec2)} | Turnovers/game {_stat(stats, 'avg_turnovers', fmt=_dec2)}",
                     f"- Rebounds/game: {_stat(stats, 'avg_rebounds', fmt=_dec2)} (off: {_stat(stats, 'avg_off_rebounds', fmt=_dec2)})",
                     f"- Defense: Steals/game {_stat(stats, 'avg_steals', fmt=_dec2)} | Blocks/game {_stat(stats, 'avg_blocks', fmt=_dec2)}",
-                    f"- Streak: {_stat(stats, 'streak')}",
+                    f"- Rest days: {stats.get('rest_days', 'N/A')}",
+                    f"- Streak: {streak_str}",
                 ])
             if sport == "americanfootball_nfl":
                 _dec1 = lambda v: f"{v:.1f}"

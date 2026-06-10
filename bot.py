@@ -165,7 +165,8 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
                   nhl_fetcher: NHLStatsFetcher | None = None,
                   nfl_fetcher: NFLStatsFetcher | None = None,
                   weather_fetcher: WeatherFetcher | None = None,
-                  world_cup_fetcher: WorldCupFetcher | None = None) -> None:
+                  world_cup_fetcher: WorldCupFetcher | None = None,
+                  wnba_fetcher: WNBAStatsFetcher | None = None) -> None:
     """Run the full analysis pipeline for a single game and place a bet if value found."""
     game = game_raw if game_raw.get("_pre_parsed") else OddsFetcher.parse_game(game_raw)
     if not game:
@@ -223,6 +224,12 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
             if weather:
                 label = "dome" if weather.get("is_dome") else f"{weather.get('temp')}°F, {weather.get('wind_speed')} mph wind"
                 logger.info(f"  Weather: {label}")
+
+    if sport == "basketball_wnba" and wnba_fetcher is not None:
+        for team_name, stats in ((home_team, home_stats), (away_team, away_stats)):
+            rd = wnba_fetcher.get_rest_days(team_name, commence)
+            if rd is not None:
+                stats["rest_days"] = rd
 
     if sport == "soccer_fifa_world_cup" and world_cup_fetcher:
         home_injuries, home_roster = world_cup_fetcher.get_team_roster_and_injuries(home_team)
@@ -494,6 +501,7 @@ def run_loop():
                     nfl_fetcher=nfl_fetcher,
                     weather_fetcher=weather_fetcher,
                     world_cup_fetcher=world_cup_fetcher,
+                    wnba_fetcher=wnba_fetcher,
                 )
 
             # 5. Summary

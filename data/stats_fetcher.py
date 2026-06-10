@@ -214,7 +214,13 @@ class ESPNStatsFetcher:
             for child in data.get("children", []):
                 for entry in child.get("standings", {}).get("entries", []):
                     team_name = entry.get("team", {}).get("displayName", "")
-                    stats = {s["name"]: s.get("value") for s in entry.get("stats", [])}
+                    # Some fields (Home, Road, Last Ten Games, overall) carry their
+                    # record only in displayValue ("4-1"); value is None. Fall back so
+                    # those reach the prompt instead of rendering N/A.
+                    stats = {}
+                    for s in entry.get("stats", []):
+                        v = s.get("value")
+                        stats[s["name"]] = v if v is not None else s.get("displayValue")
                     rows.append({"team": team_name, **stats})
             df = pd.DataFrame(rows)
             df.to_parquet(cache_file)
@@ -539,9 +545,60 @@ class WNBAStatsFetcher:
     _STATS_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/teams/{tid}/statistics"
     _CACHE_TTL_HOURS = 6
 
+    _SCHEDULE_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/teams/{tid}/schedule"
+
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "Mozilla/5.0"})
+        self._team_id_map: dict[str, str] = {}  # displayName.lower() -> team_id
+
+    def get_rest_days(self, team_name: str, game_date: datetime) -> int | None:
+        """
+        Returns days since the team's last completed game before game_date.
+        0 = back-to-back. None = schedule unavailable.
+        """
+        tid = self._resolve_team_id(team_name)
+        if not tid:
+            return None
+        target = game_date.date() if hasattr(game_date, "date") else game_date
+        try:
+            r = self.session.get(self._SCHEDULE_URL.format(tid=tid), timeout=10)
+            r.raise_for_status()
+            played = []
+            for e in r.json().get("events", []):
+                comp = (e.get("competitions") or [{}])[0]
+                if not comp.get("status", {}).get("type", {}).get("completed"):
+                    continue
+                try:
+                    gd = datetime.fromisoformat(e["date"].replace("Z", "+00:00")).date()
+                    if gd < target:
+                        played.append(gd)
+                except (KeyError, ValueError):
+                    pass
+            if not played:
+                return None
+            return (target - max(played)).days
+        except Exception as e:
+            logger.warning(f"WNBA rest days failed for {team_name}: {e}")
+            return None
+
+    def _resolve_team_id(self, team_name: str) -> str | None:
+        if not self._team_id_map:
+            try:
+                self._team_id_map = {
+                    name.lower(): tid for tid, name in self._fetch_team_list()
+                }
+            except Exception as e:
+                logger.warning(f"WNBA team list fetch failed: {e}")
+                self._team_id_map = {}
+        name = team_name.lower()
+        if name in self._team_id_map:
+            return self._team_id_map[name]
+        nick = team_name.split()[-1].lower()
+        return next(
+            (tid for n, tid in self._team_id_map.items() if n.split()[-1] == nick),
+            None,
+        )
 
     def get_team_stats(self) -> pd.DataFrame:
         """
