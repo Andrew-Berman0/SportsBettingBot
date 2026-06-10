@@ -60,6 +60,15 @@ def _send(title: str, body: str) -> None:
         logger.warning(f"Push notification failed: {e}")
 
 
+def notify_data_missing(matchup: str, sport_label: str, missing: list[str]) -> None:
+    if not missing:
+        return
+    _send(
+        title=f"⚠ Data gap — {matchup}",
+        body=f"[{sport_label}] Missing: {', '.join(missing)} — Claude analyzed with incomplete data",
+    )
+
+
 def notify_bet_placed(bet: dict, bankroll: float) -> None:
     away  = bet["away_team"]
     home  = bet["home_team"]

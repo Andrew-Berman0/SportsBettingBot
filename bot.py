@@ -43,6 +43,7 @@ from SportsBettingBot.data.outcome_tracker import OutcomeTracker
 from SportsBettingBot.features.engineer import FeatureEngineer
 from SportsBettingBot.models.claude_analyst import ClaudeAnalyst
 from SportsBettingBot.broker.paper_broker import PaperBroker
+from SportsBettingBot.notifications import push_notifier
 
 logging.basicConfig(
     level=logging.INFO,
@@ -243,6 +244,24 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
         away_roster   = roster_fetcher.get_roster_string(away_team, sport=sport)
     if home_injuries or away_injuries:
         logger.info(f"  Injuries — {home_team}: {len(home_injuries)} | {away_team}: {len(away_injuries)}")
+
+    # Alert if critical data is missing before handing off to Claude
+    _missing: list[str] = []
+    if not home_stats and not away_stats:
+        _missing.append("team stats (both teams)")
+    elif not home_stats:
+        _missing.append(f"{home_team} stats")
+    elif not away_stats:
+        _missing.append(f"{away_team} stats")
+    if sport == "soccer_fifa_world_cup":
+        if not home_roster:
+            _missing.append(f"{home_team} squad")
+        if not away_roster:
+            _missing.append(f"{away_team} squad")
+    if _missing:
+        _sport_label = sport.replace("_", " ").upper()
+        logger.warning(f"  Data gap for {away_team} @ {home_team}: {_missing}")
+        push_notifier.notify_data_missing(f"{away_team} @ {home_team}", _sport_label, _missing)
 
     features = engineer.build_game_features(game, home_stats, away_stats)
 
