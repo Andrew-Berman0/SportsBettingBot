@@ -34,25 +34,31 @@ def _fmt_odds(odds: float) -> str:
     return f"+{int(odds)}" if odds > 0 else str(int(odds))
 
 
-def _send(title: str, body: str) -> None:
+def _send(title: str, body: str, admin_only: bool = False) -> None:
     headers = _headers()
     app_id = _app_id()
     if not headers or not app_id:
         logger.debug("OneSignal not configured — skipping push")
         return
+
+    payload: dict = {
+        "app_id":   app_id,
+        "headings": {"en": title},
+        "contents": {"en": body},
+        "url":      "https://wwaid.live",
+    }
+
+    if admin_only:
+        admin_id = os.getenv("ONESIGNAL_ADMIN_PLAYER_ID", "")
+        if not admin_id:
+            logger.debug("ONESIGNAL_ADMIN_PLAYER_ID not set — skipping admin push")
+            return
+        payload["include_player_ids"] = [admin_id]
+    else:
+        payload["included_segments"] = ["All"]
+
     try:
-        r = requests.post(
-            _API_URL,
-            json={
-                "app_id":            app_id,
-                "included_segments": ["All"],
-                "headings":          {"en": title},
-                "contents":          {"en": body},
-                "url":               "https://wwaid.live",
-            },
-            headers=headers,
-            timeout=10,
-        )
+        r = requests.post(_API_URL, json=payload, headers=headers, timeout=10)
         r.raise_for_status()
         recipients = r.json().get("recipients", 0)
         logger.info(f"Push sent to {recipients} subscriber(s): {title}")
@@ -66,6 +72,7 @@ def notify_data_missing(matchup: str, sport_label: str, missing: list[str]) -> N
     _send(
         title=f"⚠ Data gap — {matchup}",
         body=f"[{sport_label}] Missing: {', '.join(missing)} — Claude analyzed with incomplete data",
+        admin_only=True,
     )
 
 
