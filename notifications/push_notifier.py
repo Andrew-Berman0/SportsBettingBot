@@ -71,7 +71,7 @@ def notify_data_missing(matchup: str, sport_label: str, missing: list[str]) -> N
         return
     _send(
         title=f"⚠ Data gap — {matchup}",
-        body=f"[{sport_label}] Missing: {', '.join(missing)} — Claude analyzed with incomplete data",
+        body=f"[{sport_label}] Missing: {' | '.join(missing)} — Claude analyzed with incomplete data",
         admin_only=True,
     )
 

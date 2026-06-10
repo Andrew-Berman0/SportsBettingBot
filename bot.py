@@ -17,6 +17,7 @@ Run:
 """
 
 import logging
+import math
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -158,6 +159,100 @@ def get_team_stats(sport: str, team_name: str, nba_fetcher: NBAStatsFetcher,
     return {}
 
 
+# Per-sport stats that should be populated if their data stream succeeded.
+# A None/NaN/placeholder here means a fetch or merge silently failed — Claude
+# would otherwise analyze with a hole in exactly the inputs its persona weights.
+_CRITICAL_STAT_FIELDS: dict[str, dict[str, str]] = {
+    "basketball_nba": {
+        "NET_RATING":   "net rating",
+        "win_pct_l10":  "last-10 form",
+        "avg_diff_l10": "last-10 point diff",
+    },
+    "baseball_mlb": {
+        "team_era":    "team ERA",
+        "bullpen_era": "bullpen ERA",
+        "team_ops":    "team OPS",
+        "streak":      "streak",
+    },
+    "icehockey_nhl": {
+        "pp_pct":      "power play %",
+        "pk_pct":      "penalty kill %",
+        "goalie_name": "top goalie",
+        "pointsFor":   "goals for",
+        "rest_days":   "rest days",
+        "streak":      "streak",
+    },
+    "basketball_wnba": {
+        "fg_pct":         "FG%",
+        "ast_to_ratio":   "A/TO ratio",
+        "Last Ten Games": "last-10 record",
+        "rest_days":      "rest days",
+        "streak":         "streak",
+    },
+    "americanfootball_nfl": {
+        "off_epa_per_play":         "offensive EPA",
+        "def_epa_allowed_per_play": "defensive EPA",
+        "sacks_allowed_pg":         "sacks allowed/game",
+        "pointsFor":                "points for",
+        "rest_days":                "rest days",
+        "streak":                   "streak",
+    },
+    "soccer_fifa_world_cup": {
+        "form": "recent form",
+    },
+}
+
+
+def _is_missing(v) -> bool:
+    """True if a stat value represents 'not found' — None, NaN, or a blank/placeholder string."""
+    if v is None:
+        return True
+    if isinstance(v, float) and math.isnan(v):
+        return True
+    if isinstance(v, str) and v.strip().upper() in ("", "N/A", "NA", "NONE", "TBD", "?"):
+        return True
+    return False
+
+
+def _detect_missing_data(sport: str, home_team: str, away_team: str,
+                         home_stats: dict, away_stats: dict,
+                         home_roster: str, away_roster: str,
+                         starting_pitchers: dict, weather: dict | None,
+                         game: dict) -> list[str]:
+    """Returns human-readable descriptions of any critical data stream that came back empty."""
+    missing: list[str] = []
+    field_map = _CRITICAL_STAT_FIELDS.get(sport, {})
+
+    for team, stats in ((home_team, home_stats), (away_team, away_stats)):
+        if not stats:
+            missing.append(f"{team}: all team stats")
+            continue
+        absent = [label for key, label in field_map.items() if _is_missing(stats.get(key))]
+        if absent:
+            missing.append(f"{team}: {', '.join(absent)}")
+
+    if sport == "soccer_fifa_world_cup":
+        if not home_roster:
+            missing.append(f"{home_team}: squad")
+        if not away_roster:
+            missing.append(f"{away_team}: squad")
+        if _is_missing(game.get("venue")):
+            missing.append("venue")
+
+    if sport == "baseball_mlb":
+        for side, team in (("home", home_team), ("away", away_team)):
+            p = (starting_pitchers or {}).get(side, {})
+            if _is_missing(p.get("name")):
+                missing.append(f"{team}: starting pitcher")
+            elif _is_missing(p.get("throws")):
+                missing.append(f"{team}: pitcher handedness")
+
+    if sport == "americanfootball_nfl" and weather is None:
+        missing.append("weather")
+
+    return missing
+
+
 def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
                   espn_fetcher: ESPNStatsFetcher, injury_fetcher: InjuryFetcher,
                   roster_fetcher: RosterFetcher, nba_stats_df, espn_stats_df,
@@ -245,24 +340,6 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     if home_injuries or away_injuries:
         logger.info(f"  Injuries — {home_team}: {len(home_injuries)} | {away_team}: {len(away_injuries)}")
 
-    # Alert if critical data is missing before handing off to Claude
-    _missing: list[str] = []
-    if not home_stats and not away_stats:
-        _missing.append("team stats (both teams)")
-    elif not home_stats:
-        _missing.append(f"{home_team} stats")
-    elif not away_stats:
-        _missing.append(f"{away_team} stats")
-    if sport == "soccer_fifa_world_cup":
-        if not home_roster:
-            _missing.append(f"{home_team} squad")
-        if not away_roster:
-            _missing.append(f"{away_team} squad")
-    if _missing:
-        _sport_label = sport.replace("_", " ").upper()
-        logger.warning(f"  Data gap for {away_team} @ {home_team}: {_missing}")
-        push_notifier.notify_data_missing(f"{away_team} @ {home_team}", _sport_label, _missing)
-
     features = engineer.build_game_features(game, home_stats, away_stats)
 
     book_home_prob = game.get("home_implied") or 0.5
@@ -284,6 +361,16 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     starting_pitchers = {}
     if sport == "baseball_mlb":
         starting_pitchers = espn_fetcher.get_starting_pitchers(home_team, away_team)
+
+    # Alert (admin push) if any critical data stream came back empty before Claude analyzes
+    _missing = _detect_missing_data(
+        sport, home_team, away_team, home_stats, away_stats,
+        home_roster, away_roster, starting_pitchers, weather, game,
+    )
+    if _missing:
+        _sport_label = sport.replace("_", " ").upper()
+        logger.warning(f"  Data gap for {away_team} @ {home_team}: {_missing}")
+        push_notifier.notify_data_missing(f"{away_team} @ {home_team}", _sport_label, _missing)
 
     logger.info(f"Analyzing: {away_team} @ {home_team} ({hours_until:.1f}h away)")
     analysis = claude.analyze_game(game, home_stats, away_stats, base_home_prob,

@@ -52,9 +52,9 @@ _ANALYST_PERSONAS: dict[str, dict[str, str]] = {
     "icehockey_nhl": {
         "role": "an expert NHL betting analyst who evaluates goaltender matchups and special teams as the primary drivers of game outcomes",
         "framework": (
-            "1. GOALTENDER performance is paramount — save percentage and goals-against average outweigh team record.\n"
+            "1. GOALTENDER performance is paramount — save percentage and goals-against average outweigh team record. Note the goalie shown is the team's season primary, NOT a confirmed starter for tonight; if a backup starts, the real matchup differs, so do not over-anchor on these numbers when the edge is thin.\n"
             "2. Special teams (power play %, penalty kill %) create consistent, repeatable edges.\n"
-            "3. In playoffs, home ice is strong (~58% home win rate); series pressure and elimination urgency are real.\n"
+            "3. Home ice is worth ~2-3% in the regular season; in the playoffs it is stronger (~58% home win rate) and series pressure and elimination urgency are real.\n"
             "4. Playoff hockey is defensive — fade high-scoring teams when they face disciplined, defensive opponents.\n"
             "5. Short rest significantly impacts goaltender performance — treat rest_days ≤ 1 as a back-to-back and discount that team's win probability by 3-5%."
         ),
@@ -85,8 +85,8 @@ _ANALYST_PERSONAS: dict[str, dict[str, str]] = {
     "americanfootball_nfl": {
         "role": "an expert NFL betting analyst who treats quarterback play and offensive line health as the foundation of every game evaluation",
         "framework": (
-            "1. Starting QB quality is the single biggest factor — a backup QB shifts win probability by 10-15%.\n"
-            "2. Offensive line health: use sacks_allowed as a proxy — teams allowing 3+ sacks/game have degraded pass protection.\n"
+            "1. Starting QB quality is the single biggest factor — if the injury list shows the starting QB out or doubtful, a backup starting shifts win probability by 10-15%. No QB rating is provided, so base QB assessments on the injury and roster data rather than assumptions.\n"
+            "2. Offensive line health: use sacks allowed per game as a proxy — teams allowing 3+ sacks/game have degraded pass protection.\n"
             "3. Offensive EPA/play and Defensive EPA allowed/play are the most reliable efficiency metrics; weight them above win% and points/game.\n"
             "4. Turnover differential is a strong game-level predictor — teams with +3 or better season differential win at ~65% rate.\n"
             "5. Weather (outdoor only): wind_speed > 15 mph suppresses passing by ~10%; temp < 32°F adds further suppression; adjust both teams equally unless one is a run-first offense.\n"
@@ -268,17 +268,33 @@ class ClaudeAnalyst:
                     goalie_line = f"{gname} — SV% {sv} | GAA {gaa}"
                 else:
                     goalie_line = "N/A"
+                # ESPN NHL standings reports season-total goals (no per-game field);
+                # divide by games played for a usable rate.
+                gp = stats.get("gamesPlayed")
+                def _per_game(total_key: str) -> str:
+                    try:
+                        return f"{float(stats.get(total_key)) / float(gp):.2f}"
+                    except (TypeError, ValueError, ZeroDivisionError):
+                        return "N/A"
+                streak_raw = stats.get("streak")
+                try:
+                    sv_streak = int(float(streak_raw))
+                    streak_str = f"W{sv_streak}" if sv_streak >= 0 else f"L{abs(sv_streak)}"
+                except (TypeError, ValueError):
+                    streak_str = "N/A"
+                last10 = stats.get("Last Ten Games")
+                last10 = last10.split(",")[0] if isinstance(last10, str) else "N/A"
                 return "\n".join([
-                    f"- Points: {_stat(stats, 'points')}",
-                    f"- Goals/game (for): {_stat(stats, 'pointsFor', fmt=_dec2)}",
-                    f"- Goals/game (against): {_stat(stats, 'pointsAgainst', fmt=_dec2)}",
-                    f"- Goal differential: {_stat(stats, 'differential', 'pointDifferential')}",
+                    f"- Points: {_stat(stats, 'points', fmt=lambda v: str(int(v)))}",
+                    f"- Goals/game (for): {_per_game('pointsFor')}",
+                    f"- Goals/game (against): {_per_game('pointsAgainst')}",
+                    f"- Goal differential/game: {_stat(stats, 'differential', fmt=lambda v: f'{v:+.2f}')}",
                     f"- Power play: {_stat(stats, 'pp_pct', fmt=_pct1)} | Penalty kill: {_stat(stats, 'pk_pct', fmt=_pct1)}",
                     f"- Shots/game: {_stat(stats, 'shots_for_pg', fmt=_dec2)} (for) / {_stat(stats, 'shots_against_pg', fmt=_dec2)} (against)",
-                    f"- Top goalie: {goalie_line}",
+                    f"- Top goalie (season primary, not a confirmed starter): {goalie_line}",
                     f"- Rest days: {_stat(stats, 'rest_days')}",
-                    f"- Last 10: {_stat(stats, 'Last Ten Games')}",
-                    f"- Streak: {_stat(stats, 'streak')}",
+                    f"- Last 10: {last10}",
+                    f"- Streak: {streak_str}",
                 ])
             if sport == "basketball_wnba":
                 _dec2 = lambda v: f"{v:.2f}"
@@ -308,15 +324,33 @@ class ClaudeAnalyst:
                 _dec2 = lambda v: f"{v:.2f}"
                 _int  = lambda v: str(int(v))
                 _sgn  = lambda v: f"+{int(v)}" if v >= 0 else str(int(v))
+                # ESPN NFL standings reports season-total points (no per-game field
+                # and no gamesPlayed); derive games from the record for a usable rate.
+                try:
+                    gp_nfl = sum(float(stats.get(k, 0) or 0) for k in ("wins", "losses", "ties"))
+                except (TypeError, ValueError):
+                    gp_nfl = 0
+                def _ppg(total_key: str) -> str:
+                    try:
+                        return f"{float(stats.get(total_key)) / gp_nfl:.1f}" if gp_nfl else "N/A"
+                    except (TypeError, ValueError, ZeroDivisionError):
+                        return "N/A"
+                streak_raw = stats.get("streak")
+                try:
+                    sv_streak = int(float(streak_raw))
+                    streak_str = f"W{sv_streak}" if sv_streak >= 0 else f"L{abs(sv_streak)}"
+                except (TypeError, ValueError):
+                    streak_str = "N/A"
                 return "\n".join([
                     f"- Win %: {_stat(stats, 'winPercent', fmt=lambda v: f'{v:.1%}')}",
-                    f"- Points/game: {_stat(stats, 'pointsFor', fmt=_dec1)} (for) / {_stat(stats, 'pointsAgainst', fmt=_dec1)} (against)",
+                    f"- Points/game: {_ppg('pointsFor')} (for) / {_ppg('pointsAgainst')} (against)",
                     f"- Yards/game: passing {_stat(stats, 'pass_yards_pg', fmt=_dec1)} | rushing {_stat(stats, 'rush_yards_pg', fmt=_dec1)}",
                     f"- Turnover diff: {_stat(stats, 'to_differential', fmt=_sgn)} (giveaways {_stat(stats, 'giveaways', fmt=_int)} / takeaways {_stat(stats, 'takeaways', fmt=_int)})",
-                    f"- Sacks allowed: {_stat(stats, 'sacks_allowed', fmt=_int)} | Defensive sacks: {_stat(stats, 'def_sacks', fmt=_int)}",
+                    f"- Sacks allowed/game: {_stat(stats, 'sacks_allowed_pg', fmt=_dec1)} | Defensive sacks/game: {_stat(stats, 'def_sacks_pg', fmt=_dec1)}",
                     f"- Offensive EPA/play: {_stat(stats, 'off_epa_per_play', fmt=_dec2)} | Defensive EPA allowed/play: {_stat(stats, 'def_epa_allowed_per_play', fmt=_dec2)}",
+                    f"- Home: {_stat(stats, 'Home')} | Road: {_stat(stats, 'Road')}",
                     f"- Rest days: {_stat(stats, 'rest_days')}",
-                    f"- Streak: {_stat(stats, 'streak')}",
+                    f"- Streak: {streak_str}",
                 ])
             if sport == "soccer_fifa_world_cup":
                 form = stats.get("form", "N/A")

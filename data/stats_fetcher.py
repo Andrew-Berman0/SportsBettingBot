@@ -897,24 +897,31 @@ class NFLStatsFetcher:
                      .get("stats", {})
                      .get("categories", []))
             flat: dict = {}
+            flat_pg: dict = {}
             for cat in cats:
                 prefix = cat.get("name", "")
                 for stat in cat.get("stats", []):
-                    flat[f"{prefix}_{stat['name']}"] = stat.get("value")
+                    key = f"{prefix}_{stat['name']}"
+                    flat[key] = stat.get("value")
+                    pg = stat.get("perGameValue")
+                    if pg is not None:
+                        flat_pg[key] = pg
             return {
-                "pass_yards_pg":   (flat.get("passing_avgYards")
-                                    or flat.get("passing_passingYardsPerGame")),
-                "rush_yards_pg":   (flat.get("rushing_avgYards")
-                                    or flat.get("rushing_rushingYardsPerGame")),
-                "sacks_allowed":   (flat.get("passing_sacks")
-                                    or flat.get("general_sacksAllowed")),
-                "def_sacks":        flat.get("defensive_sacks"),
-                "giveaways":       (flat.get("general_giveaways")
-                                    or flat.get("scoring_giveaways")),
-                "takeaways":       (flat.get("general_takeaways")
-                                    or flat.get("defensive_takeaways")),
-                "to_differential": (flat.get("general_turnoverRatio")
-                                    or flat.get("general_turnoverDifferential")),
+                "pass_yards_pg":    (flat.get("passing_avgYards")
+                                     or flat.get("passing_passingYardsPerGame")),
+                "rush_yards_pg":    (flat.get("rushing_avgYards")
+                                     or flat.get("rushing_rushingYardsPerGame")),
+                # Per-game sacks (ESPN supplies perGameValue) — the season total
+                # mislabels the "3+ sacks/game" line protection signal.
+                "sacks_allowed_pg": (flat_pg.get("passing_sacks")
+                                     or flat_pg.get("general_sacksAllowed")),
+                "def_sacks_pg":      flat_pg.get("defensive_sacks"),
+                "giveaways":        (flat.get("general_giveaways")
+                                     or flat.get("scoring_giveaways")),
+                "takeaways":        (flat.get("general_takeaways")
+                                     or flat.get("defensive_takeaways")),
+                "to_differential":  (flat.get("general_turnoverRatio")
+                                     or flat.get("general_turnoverDifferential")),
             }
         except Exception:
             return {}
