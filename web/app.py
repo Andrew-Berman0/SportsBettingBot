@@ -26,11 +26,12 @@ STATE_FILE        = Path(__file__).parent.parent / "broker_state.json"
 STARTING_BANKROLL = 10_000.0
 
 SPORT_LABELS = {
-    "basketball_nba":       "NBA",
-    "basketball_wnba":      "WNBA",
-    "baseball_mlb":         "MLB",
-    "icehockey_nhl":        "NHL",
-    "americanfootball_nfl": "NFL",
+    "basketball_nba":        "NBA",
+    "basketball_wnba":       "WNBA",
+    "baseball_mlb":          "MLB",
+    "icehockey_nhl":         "NHL",
+    "americanfootball_nfl":  "NFL",
+    "soccer_fifa_world_cup": "WC",
 }
 
 
