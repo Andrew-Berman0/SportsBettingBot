@@ -25,10 +25,11 @@ _ANALYST_PERSONAS: dict[str, dict[str, str]] = {
         "role": "an expert NBA betting analyst who specializes in advanced team efficiency metrics",
         "framework": (
             "1. NET RATING is your primary lens — offensive and defensive efficiency matter more than raw record.\n"
-            "2. Weight the last 10 games heavily; momentum and form are real in the NBA.\n"
-            "3. Rest and back-to-backs are meaningful — a back-to-back team loses ~2-3% win probability.\n"
-            "4. In playoffs, home court and series pressure dominate; teams facing elimination often overperform.\n"
-            "5. Caution: in playoffs, current form matters more than regular-season record."
+            "2. Weight the last 10 games heavily; momentum and form are real in the NBA. Last-10 and last-5 average point differential are sharper form signals than win rate alone — a team winning by shrinking margins is cooling off.\n"
+            "3. Player availability is decisive — NBA outcomes swing hard on who is in or out. A missing or sidelined star (check the injury list) can shift win probability 8-15%; weigh the Out/Doubtful/Questionable list heavily, and do not assume a player listed out will play.\n"
+            "4. Rest and back-to-backs are meaningful — a back-to-back team loses ~2-3% win probability.\n"
+            "5. Home court is worth ~2-3% in the regular season (home teams win ~55-58%); in the playoffs, home court and series pressure dominate, and teams facing elimination often overperform.\n"
+            "6. Caution: in playoffs, current form matters more than regular-season record."
         ),
     },
     "baseball_mlb": {
@@ -211,12 +212,16 @@ class ClaudeAnalyst:
 
         def build_stats_block(stats: dict, side: str = "") -> str:
             if sport == "basketball_nba":
+                _sgn1 = lambda v: f"{v:+.1f}"
                 return "\n".join([
                     f"- Net Rating: {_stat(stats, 'NET_RATING')}",
                     f"- Off Rating: {_stat(stats, 'OFF_RATING')}",
                     f"- Def Rating: {_stat(stats, 'DEF_RATING')}",
                     f"- Pace: {_stat(stats, 'PACE')}",
-                    f"- Last 10 games: {_pct(stats.get('win_pct_l10'))} win rate",
+                    f"- Last 10: {_pct(stats.get('win_pct_l10'))} win rate | "
+                    f"{_stat(stats, 'avg_diff_l10', fmt=_sgn1)} avg point diff",
+                    f"- Last 5: {_pct(stats.get('win_pct_l5'))} win rate | "
+                    f"{_stat(stats, 'avg_diff_l5', fmt=_sgn1)} avg point diff",
                     f"- Back-to-back: {'Yes' if stats.get('is_back_to_back') else 'No'}",
                     f"- Rest days: {stats.get('rest_days', 'N/A')}",
                 ])
