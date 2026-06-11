@@ -57,6 +57,27 @@ logging.basicConfig(
 )
 logger = logging.getLogger("bot")
 
+_SPORT_SHORT: dict[str, str] = {
+    "basketball_nba":        "NBA",
+    "basketball_wnba":       "WNBA",
+    "baseball_mlb":          "MLB",
+    "icehockey_nhl":         "NHL",
+    "americanfootball_nfl":  "NFL",
+    "soccer_fifa_world_cup": "WC",
+}
+
+_SPORT_TAG: dict[str, str] = {
+    "basketball_nba":        "\033[95mNBA\033[0m",
+    "basketball_wnba":       "\033[33mWNBA\033[0m",
+    "baseball_mlb":          "\033[34mMLB\033[0m",
+    "icehockey_nhl":         "\033[36mNHL\033[0m",
+    "americanfootball_nfl":  "\033[32mNFL\033[0m",
+    "soccer_fifa_world_cup": "\033[93mWC\033[0m",
+}
+
+def _sport_tag(sport: str) -> str:
+    return _SPORT_TAG.get(sport, sport.split("_")[-1].upper())
+
 
 def _hours_until(g: dict) -> float | None:
     ct = g.get("commence_time")
@@ -370,11 +391,14 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
         home_roster, away_roster, starting_pitchers, weather, game,
     )
     if _missing:
-        _sport_label = sport.replace("_", " ").upper()
-        logger.warning(f"  Data gap for {away_team} @ {home_team}: {_missing}")
-        push_notifier.notify_data_missing(f"{away_team} @ {home_team}", _sport_label, _missing)
+        logger.warning(f"  [{_sport_tag(sport)}] Data gap for {away_team} @ {home_team}: {_missing}")
+        push_notifier.notify_data_missing(
+            f"{away_team} @ {home_team}",
+            _SPORT_SHORT.get(sport, sport.split("_")[-1].upper()),
+            _missing,
+        )
 
-    logger.info(f"Analyzing: {away_team} @ {home_team} ({hours_until:.1f}h away)")
+    logger.info(f"[{_sport_tag(sport)}] Analyzing: {away_team} @ {home_team} ({hours_until:.1f}h away)")
     analysis = claude.analyze_game(game, home_stats, away_stats, base_home_prob,
                                    home_injuries=home_injuries, away_injuries=away_injuries,
                                    home_roster=home_roster, away_roster=away_roster,
@@ -470,9 +494,9 @@ def run_loop():
 
     logger.info("=" * 60)
     logger.info("Sports Betting Bot started [PAPER MODE]")
-    logger.info(f"Sports: {CONFIG.sports.sports}")
+    logger.info(f"Sports: {[_sport_tag(s) for s in CONFIG.sports.sports]}")
     edge_summary = ", ".join(
-        f"{s.split('_')[1].upper()}: {e:.0%}"
+        f"{_sport_tag(s)}: {e:.0%}"
         for s, e in CONFIG.bankroll.min_edge_by_sport.items()
     )
     logger.info(f"Min edge: [{edge_summary}]  |  Flat bet: {CONFIG.bankroll.flat_bet_pct:.1%} of bankroll")
