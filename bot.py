@@ -18,6 +18,7 @@ Run:
 
 import logging
 import math
+import re
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -46,15 +47,22 @@ from SportsBettingBot.models.claude_analyst import ClaudeAnalyst
 from SportsBettingBot.broker.paper_broker import PaperBroker
 from SportsBettingBot.notifications import push_notifier
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(name)s: %(message)s",
-    datefmt="%H:%M:%S",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("bot.log"),
-    ]
-)
+_LOG_FMT  = "%(asctime)s  %(levelname)-8s  %(name)s: %(message)s"
+_LOG_DATE = "%H:%M:%S"
+_ANSI_RE  = re.compile(r"\x1b\[[0-9;]*m")
+
+class _PlainFormatter(logging.Formatter):
+    """Strips ANSI color codes so the log file stays human-readable."""
+    def format(self, record: logging.LogRecord) -> str:
+        return _ANSI_RE.sub("", super().format(record))
+
+_stream_handler = logging.StreamHandler()
+_stream_handler.setFormatter(logging.Formatter(_LOG_FMT, datefmt=_LOG_DATE))
+
+_file_handler = logging.FileHandler("bot.log")
+_file_handler.setFormatter(_PlainFormatter(_LOG_FMT, datefmt=_LOG_DATE))
+
+logging.basicConfig(level=logging.INFO, handlers=[_stream_handler, _file_handler])
 logger = logging.getLogger("bot")
 
 _SPORT_SHORT: dict[str, str] = {
