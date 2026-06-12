@@ -200,7 +200,7 @@ async def index(request: Request):
         "roi":        roi,
         "wins":       wins,
         "losses":     losses,
-        "total_bets": len(closed),
+        "total_bets": len(decided),
         "win_rate":   win_rate,
     }
 
