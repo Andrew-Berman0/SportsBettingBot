@@ -37,6 +37,8 @@ class ResultsFetcher:
         Returns completed games from the past `days_back` days for the given sport.
         Each entry: {home_team, away_team, home_score, away_score, date}
         """
+        if sport == "mma_ufc":
+            return self._completed_mma(days_back)
         if sport not in SPORT_ESPN_MAP:
             return []
 
@@ -73,6 +75,41 @@ class ResultsFetcher:
                         })
             except Exception as e:
                 logger.warning(f"ResultsFetcher error for {sport} {date}: {e}")
+        return results
+
+    def _completed_mma(self, days_back: int) -> list[dict]:
+        """
+        Completed UFC fights. A card is one event with many fights, each decided by
+        a `winner` flag (no scores). Emits a 1/0 score per fight, in BOTH fighter
+        orderings, so outcome_tracker's order-sensitive name key matches either way.
+        """
+        url = "https://site.api.espn.com/apis/site/v2/sports/mma/ufc/scoreboard"
+        results = []
+        for days_ago in range(days_back + 1):
+            date = (datetime.now(timezone.utc) - timedelta(days=days_ago)).strftime("%Y%m%d")
+            date_iso = date[:4] + "-" + date[4:6] + "-" + date[6:]
+            try:
+                resp = self.session.get(url, params={"dates": date}, timeout=10)
+                resp.raise_for_status()
+                for event in resp.json().get("events", []):
+                    for comp in event.get("competitions", []):
+                        if not comp.get("status", {}).get("type", {}).get("completed"):
+                            continue
+                        competitors = comp.get("competitors", [])
+                        if len(competitors) != 2:
+                            continue
+                        fa, fb = competitors[0], competitors[1]
+                        na = fa.get("athlete", {}).get("displayName")
+                        nb = fb.get("athlete", {}).get("displayName")
+                        a_won, b_won = bool(fa.get("winner")), bool(fb.get("winner"))
+                        if not na or not nb or a_won == b_won:
+                            continue   # missing name or draw/no-contest
+                        results.append({"home_team": na, "away_team": nb,
+                                        "home_score": int(a_won), "away_score": int(b_won), "date": date_iso})
+                        results.append({"home_team": nb, "away_team": na,
+                                        "home_score": int(b_won), "away_score": int(a_won), "date": date_iso})
+            except Exception as e:
+                logger.warning(f"ResultsFetcher MMA completed error for {date}: {e}")
         return results
 
     _VOID_STATUSES = {"STATUS_POSTPONED", "STATUS_CANCELED", "STATUS_SUSPENDED"}

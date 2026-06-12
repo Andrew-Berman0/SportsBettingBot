@@ -28,6 +28,7 @@ _MIN_HOURS_AFTER_START = {
     "baseball_mlb":         4.0,
     "icehockey_nhl":        3.5,
     "americanfootball_nfl": 4.0,
+    "mma_ufc":              6.0,   # a card's fights all share the start time but run ~6h
 }
 _DEFAULT_HOURS = 4.0
 
