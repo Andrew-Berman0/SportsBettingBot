@@ -7,6 +7,7 @@ No API key required.
 """
 
 import logging
+import unicodedata
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
@@ -96,6 +97,11 @@ class ResultsFetcher:
         settled_count = 0
 
         for sport, sport_bets in bets_by_sport.items():
+            if sport == "mma_ufc":
+                # MMA settles by winner (no scores), and a card is one event with many
+                # fights — needs its own path rather than the team score-comparison logic.
+                settled_count += self._settle_mma(sport_bets, broker, now)
+                continue
             if sport not in SPORT_ESPN_MAP:
                 logger.debug(f"No ESPN scoreboard configured for sport '{sport}' — skipping settlement")
                 continue
@@ -184,6 +190,86 @@ class ResultsFetcher:
                     logger.warning(f"ResultsFetcher error for {sport} {date}: {e}")
 
         return settled_count
+
+    def _settle_mma(self, sport_bets: list, broker, now: datetime) -> int:
+        """
+        Settle UFC bets. A card is one ESPN event with many fights (competitions);
+        each fight is decided by a `winner` flag, not a score. We synthesize a
+        1/0 score for the bet's home/away fighter so the broker's normal moneyline
+        settlement applies. Draws / no-contests void the bet.
+        """
+        settled = 0
+        url = "https://site.api.espn.com/apis/site/v2/sports/mma/ufc/scoreboard"
+
+        days_back = 3
+        for b in sport_bets:
+            ct = b.get("commence_time")
+            if ct:
+                try:
+                    start = datetime.fromisoformat(ct.replace("Z", "+00:00"))
+                    days_back = max(days_back, (now - start).days + 1)
+                except Exception:
+                    pass
+        days_back = min(days_back, 30)
+
+        for days_ago in range(days_back + 1):
+            if not sport_bets:
+                break
+            date = (now - timedelta(days=days_ago)).strftime("%Y%m%d")
+            try:
+                resp = self.session.get(url, params={"dates": date}, timeout=10)
+                resp.raise_for_status()
+                for event in resp.json().get("events", []):
+                    for comp in event.get("competitions", []):
+                        competitors = comp.get("competitors", [])
+                        if len(competitors) != 2:
+                            continue
+                        by_name = {c.get("athlete", {}).get("displayName", ""): c for c in competitors}
+                        if "" in by_name:
+                            continue
+                        fight_names = {self._norm_fighter(n) for n in by_name}
+                        matching = [
+                            b for b in sport_bets
+                            if {self._norm_fighter(b["home_team"]),
+                                self._norm_fighter(b["away_team"])} == fight_names
+                            and self._game_has_started(b.get("commence_time"), now)
+                        ]
+                        if not matching:
+                            continue
+                        b = matching[0]
+                        game_id = b["game_id"]
+                        status = comp.get("status", {}).get("type", {})
+
+                        if status.get("completed"):
+                            winner = next((n for n, c in by_name.items() if c.get("winner")), None)
+                            if winner is None:   # draw or no-contest
+                                voided = broker.void_bet(game_id=game_id, reason="draw_or_no_contest")
+                                settled += len(voided)
+                                logger.info(f"Voiding UFC fight (draw/NC): {b['home_team']} vs {b['away_team']}")
+                            else:
+                                home_won = self._norm_fighter(b["home_team"]) == self._norm_fighter(winner)
+                                logger.info(f"Settling UFC: {winner} def. opponent [{b['home_team']} vs {b['away_team']}]")
+                                done = broker.settle_bet(
+                                    game_id=game_id,
+                                    home_score=1 if home_won else 0,
+                                    away_score=0 if home_won else 1,
+                                )
+                                settled += len(done)
+                            sport_bets[:] = [x for x in sport_bets if x["game_id"] != game_id]
+                        elif status.get("name") in self._VOID_STATUSES:
+                            reason = status["name"].replace("STATUS_", "").lower()
+                            voided = broker.void_bet(game_id=game_id, reason=reason)
+                            settled += len(voided)
+                            sport_bets[:] = [x for x in sport_bets if x["game_id"] != game_id]
+            except Exception as e:
+                logger.warning(f"ResultsFetcher MMA error for {date}: {e}")
+
+        return settled
+
+    @staticmethod
+    def _norm_fighter(name: str) -> str:
+        n = unicodedata.normalize("NFKD", name or "").encode("ascii", "ignore").decode()
+        return " ".join("".join(c for c in n.lower() if c.isalnum() or c == " ").split())
 
     @staticmethod
     def _teams_match(bet_name: str, espn_name: str) -> bool:

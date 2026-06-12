@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 @dataclass
 class SportsConfig:
-    sports: list = field(default_factory=lambda: ["basketball_nba", "basketball_wnba", "americanfootball_nfl", "baseball_mlb", "icehockey_nhl", "soccer_fifa_world_cup"])
+    sports: list = field(default_factory=lambda: ["basketball_nba", "basketball_wnba", "americanfootball_nfl", "baseball_mlb", "icehockey_nhl", "soccer_fifa_world_cup", "mma_ufc"])
     primary_sport: str = "basketball_nba"
     bet_types: list = field(default_factory=lambda: ["h2h", "totals"])  # moneyline + over/under
     bookmakers: list = field(default_factory=lambda: ["fanduel", "draftkings", "betmgm"])
@@ -22,6 +22,7 @@ class BankrollConfig:
         "baseball_mlb":          0.03,
         "icehockey_nhl":         0.03,
         "soccer_fifa_world_cup": 0.04,
+        "mma_ufc":               0.05,   # high variance — demand a larger edge
     })
     max_open_bets: int = 15              # max simultaneous bets
     min_odds: float = -300               # avoid heavy favorites (implied > 75%)
@@ -49,6 +50,7 @@ class BettingBotConfig:
     model:     ModelConfig    = field(default_factory=ModelConfig)
     claude:    ClaudeConfig   = field(default_factory=ClaudeConfig)
     odds_api_key: str         = field(default_factory=lambda: os.getenv("THE_RUNDOWN_API_KEY", ""))
+    the_odds_api_key: str     = field(default_factory=lambda: os.getenv("ODDS_API_KEY", ""))  # The Odds API — UFC odds
     loop_interval_seconds: int = 3600   # check for new games every hour
     state_file: str = "bot_state.json"
     log_file:   str = "bot.log"

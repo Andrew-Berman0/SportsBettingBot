@@ -36,6 +36,7 @@ sys.path.insert(0, str(_here if (_here / "SportsBettingBot").is_dir() else _here
 from SportsBettingBot.config import CONFIG
 from SportsBettingBot.data.odds_fetcher import OddsFetcher
 from SportsBettingBot.data.world_cup_fetcher import WorldCupFetcher
+from SportsBettingBot.data.ufc_fetcher import UFCFetcher
 from SportsBettingBot.data.stats_fetcher import NBAStatsFetcher, ESPNStatsFetcher, MLBStatsFetcher, NHLStatsFetcher, WNBAStatsFetcher, NFLStatsFetcher
 from SportsBettingBot.data.weather_fetcher import WeatherFetcher
 from SportsBettingBot.data.injury_fetcher import InjuryFetcher
@@ -72,6 +73,7 @@ _SPORT_SHORT: dict[str, str] = {
     "icehockey_nhl":         "NHL",
     "americanfootball_nfl":  "NFL",
     "soccer_fifa_world_cup": "WC",
+    "mma_ufc":               "UFC",
 }
 
 _SPORT_TAG: dict[str, str] = {
@@ -81,6 +83,7 @@ _SPORT_TAG: dict[str, str] = {
     "icehockey_nhl":         "\033[36mNHL\033[0m",
     "americanfootball_nfl":  "\033[32mNFL\033[0m",
     "soccer_fifa_world_cup": "\033[93mWC\033[0m",
+    "mma_ufc":               "\033[91mUFC\033[0m",
 }
 
 def _sport_tag(sport: str) -> str:
@@ -229,6 +232,13 @@ _CRITICAL_STAT_FIELDS: dict[str, dict[str, str]] = {
     "soccer_fifa_world_cup": {
         "form": "recent form",
     },
+    "mma_ufc": {
+        "record":        "record",
+        "strikeLPM":     "strikes landed/min",
+        "strikeAccuracy": "striking accuracy",
+        "takedownAvg":   "takedown average",
+        "reach":         "reach",
+    },
 }
 
 
@@ -291,7 +301,8 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
                   nfl_fetcher: NFLStatsFetcher | None = None,
                   weather_fetcher: WeatherFetcher | None = None,
                   world_cup_fetcher: WorldCupFetcher | None = None,
-                  wnba_fetcher: WNBAStatsFetcher | None = None) -> None:
+                  wnba_fetcher: WNBAStatsFetcher | None = None,
+                  ufc_fetcher: UFCFetcher | None = None) -> None:
     """Run the full analysis pipeline for a single game and place a bet if value found."""
     game = game_raw if game_raw.get("_pre_parsed") else OddsFetcher.parse_game(game_raw)
     if not game:
@@ -330,8 +341,15 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     home_team = game["home_team"]
     away_team = game["away_team"]
 
-    home_stats = get_team_stats(sport, home_team, nba_fetcher, nba_stats_df, espn_stats_df)
-    away_stats = get_team_stats(sport, away_team, nba_fetcher, nba_stats_df, espn_stats_df)
+    if sport == "mma_ufc" and ufc_fetcher is not None:
+        # Individual sport — stats come per-fighter from ESPN core (id stored on the fight).
+        home_stats = ufc_fetcher.get_fighter_stats(game.get("home_team_id"))
+        away_stats = ufc_fetcher.get_fighter_stats(game.get("away_team_id"))
+        home_stats["record"] = game.get("home_record")
+        away_stats["record"] = game.get("away_record")
+    else:
+        home_stats = get_team_stats(sport, home_team, nba_fetcher, nba_stats_df, espn_stats_df)
+        away_stats = get_team_stats(sport, away_team, nba_fetcher, nba_stats_df, espn_stats_df)
 
     if sport == "icehockey_nhl" and nhl_fetcher is not None:
         for stats in (home_stats, away_stats):
@@ -485,6 +503,7 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
 def run_loop():
     odds_fetcher     = OddsFetcher(api_key=CONFIG.odds_api_key)
     world_cup_fetcher = WorldCupFetcher()
+    ufc_fetcher      = UFCFetcher(odds_api_key=CONFIG.the_odds_api_key)
     nba_fetcher      = NBAStatsFetcher()
     espn_fetcher     = ESPNStatsFetcher()
     mlb_fetcher      = MLBStatsFetcher()
@@ -530,6 +549,8 @@ def run_loop():
             for sport in CONFIG.sports.sports:
                 if sport == "soccer_fifa_world_cup":
                     games = world_cup_fetcher.get_upcoming_games()
+                elif sport == "mma_ufc":
+                    games = ufc_fetcher.get_upcoming_fights()
                 else:
                     games = odds_fetcher.get_upcoming_games(sport, CONFIG.sports.bookmakers)
                 for g in games:
@@ -570,6 +591,8 @@ def run_loop():
                     continue
                 if sport == "basketball_nba" and nba_stats_df is None:
                     nba_stats_df = nba_fetcher.get_team_stats()
+                elif sport == "mma_ufc":
+                    continue   # fighter stats fetched per-fight in evaluate_game
                 elif sport == "soccer_fifa_world_cup" and sport not in espn_stats_cache:
                     espn_stats_cache[sport] = world_cup_fetcher.get_team_stats()
                 elif sport != "basketball_nba" and sport not in espn_stats_cache:
@@ -642,6 +665,7 @@ def run_loop():
                     weather_fetcher=weather_fetcher,
                     world_cup_fetcher=world_cup_fetcher,
                     wnba_fetcher=wnba_fetcher,
+                    ufc_fetcher=ufc_fetcher,
                 )
 
             # 5. Summary

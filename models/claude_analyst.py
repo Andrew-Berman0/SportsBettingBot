@@ -95,6 +95,19 @@ _ANALYST_PERSONAS: dict[str, dict[str, str]] = {
             "8. The NFL market is the most efficient of all major sports — default to 'pass' when edges are below 4% or data is thin."
         ),
     },
+    "mma_ufc": {
+        "role": "an expert UFC/MMA betting analyst who reads style matchups, physical edges, and finishing ability",
+        "framework": (
+            "1. STYLE MATCHUP is your primary lens — infer each fighter's style from the stats: high strikes-landed-per-minute with good accuracy signals a volume striker; high takedown average plus submission attempts signals a grappler. A grappler who can impose takedowns on a fighter who needs the fight standing is a real stylistic edge — and the reverse when a takedown-reliant fighter meets a pure striker who can stay upright.\n"
+            "2. IMPORTANT: only OFFENSIVE stats are provided (strikes landed/min, striking accuracy, takedown average/accuracy, submission attempts). You are NOT given strikes absorbed, striking defense, or takedown defense — so do not state a fighter's defense or durability as fact; infer it cautiously and flag the uncertainty.\n"
+            "3. Physical edges matter: a large reach advantage favors a rangy, accurate striker; a southpaw-vs-orthodox matchup can disrupt the orthodox fighter. Weigh reach and stance alongside style, not in isolation.\n"
+            "4. Age and decline: MMA fighters fall off sharply after ~35, especially cardio and chin. Lean toward the younger fighter when ages diverge and the older one is past their mid-30s.\n"
+            "5. Finishing tendency: a high KO/TKO% means real one-shot upset equity even as an underdog; a decision-heavy fighter is lower variance. Use this when weighing live dogs against favorites.\n"
+            "6. MMA is extremely high-variance — anyone can be finished by a single strike. Be skeptical of heavy favorites priced -350 or worse, and default to 'pass' unless multiple factors (style, physicals, age) align behind one fighter.\n"
+            "7. Records reflect quality but you are NOT given strength of schedule — do not over-read a gaudy record that may be built on weak opposition.\n"
+            "8. Thin data = pass. For debutants or fighters with very few bouts the stats are tiny-sample and unreliable; default to 'pass' rather than guessing."
+        ),
+    },
 }
 
 _DEFAULT_PERSONA = {
@@ -367,10 +380,56 @@ class ClaudeAnalyst:
                     f"- Tournament record: {w}W-{d}D-{l}L ({pts} pts)",
                     f"- Goals: {gf} for, {ga} against (GD: {gd_str})",
                 ])
+            if sport == "mma_ufc":
+                reach = stats.get("reach")
+                try:
+                    reach_str = f"{float(reach):.0f}\"" if reach not in (None, "") else "N/A"
+                except (TypeError, ValueError):
+                    reach_str = "N/A"
+                return "\n".join([
+                    f"- Age: {_stat(stats, 'age')} | Height: {stats.get('height') or 'N/A'} | Reach: {reach_str} | Stance: {stats.get('stance') or 'N/A'}",
+                    f"- Striking: {_stat(stats, 'strikeLPM')} sig. strikes landed/min at {_stat(stats, 'strikeAccuracy')}% accuracy",
+                    f"- Grappling: {_stat(stats, 'takedownAvg')} takedowns/15min at {_stat(stats, 'takedownAccuracy')}% accuracy | {_stat(stats, 'submissionAvg')} sub attempts/15min",
+                    f"- Finishing rate: KO {_stat(stats, 'koPercentage')}% | TKO {_stat(stats, 'tkoPercentage')}% | decision {_stat(stats, 'decisionPercentage')}%",
+                ])
             return "- Stats: Not available"
 
-        home_record = build_record(home_stats)
-        away_record = build_record(away_stats)
+        is_ufc = sport == "mma_ufc"
+        if is_ufc:
+            # Individual sport: record comes as a "W-L-D" string; no roster/injuries.
+            home_record = home_stats.get("record") or "N/A"
+            away_record = away_stats.get("record") or "N/A"
+            matchup_line = f"FIGHT: {home} vs {away}"
+            home_label, away_label = f"FIGHTER A ({home})", f"FIGHTER B ({away})"
+            home_extra = away_extra = ""
+            player_rule = (
+                "CRITICAL DATA RULE: Base your analysis ONLY on the two fighters named above and the "
+                "stats provided. Do NOT pull in details from your training data — a fighter's recent "
+                "results, finishes, injuries, weight-cut problems, or camp changes you recall may be "
+                "outdated or wrong. If the data above is sparse, treat that fighter as an unknown rather "
+                "than filling gaps from memory."
+            )
+        else:
+            home_record = build_record(home_stats)
+            away_record = build_record(away_stats)
+            matchup_line = f"GAME: {away} @ {home}"
+            home_label, away_label = f"HOME TEAM ({home})", f"AWAY TEAM ({away})"
+            home_extra = (
+                f"\n- Current roster: {home_roster or 'Not available'}\n"
+                f"- Injuries (Out/Doubtful/Questionable):\n{fmt_injuries(home_injuries)}"
+            )
+            away_extra = (
+                f"\n- Current roster: {away_roster or 'Not available'}\n"
+                f"- Injuries (Out/Doubtful/Questionable):\n{fmt_injuries(away_injuries)}"
+            )
+            player_rule = (
+                "CRITICAL PLAYER DATA RULE: Your reasoning may ONLY name specific players who appear in "
+                "the roster or injury list provided above. Do NOT name any player from your training data "
+                "who is not listed — rosters change constantly and your training data is stale. If a player "
+                "you recall is not in the data above, they may have been traded, cut, or retired. Mentioning "
+                "a player not in the provided data is a factual error. Base all player-specific claims "
+                "strictly on the lists above."
+            )
 
         series_block = (
             f"\nPLAYOFF SERIES CONTEXT:\n- Current series standing: {series_context}\n"
@@ -412,7 +471,7 @@ class ClaudeAnalyst:
 ANALYST FRAMEWORK FOR THIS SPORT:
 {persona['framework']}
 
-GAME: {away} @ {home}
+{matchup_line}
 Sport: {sport}
 Commence: {game.get('commence_time', 'Unknown')}{venue_line}
 
@@ -421,25 +480,19 @@ ODDS:
 - {away} moneyline: {game.get('away_ml', 'N/A')} (implied: {game.get('away_implied', 0):.1%})
 - Total line: {game.get('total_line', 'N/A')}
 {series_block}{weather_block}
-HOME TEAM ({home}):
+{home_label}:
 - Record: {home_record}
-{build_stats_block(home_stats, "home")}
-- Current roster: {home_roster or 'Not available'}
-- Injuries (Out/Doubtful/Questionable):
-{fmt_injuries(home_injuries)}
+{build_stats_block(home_stats, "home")}{home_extra}
 
-AWAY TEAM ({away}):
+{away_label}:
 - Record: {away_record}
-{build_stats_block(away_stats, "away")}
-- Current roster: {away_roster or 'Not available'}
-- Injuries (Out/Doubtful/Questionable):
-{fmt_injuries(away_injuries)}
+{build_stats_block(away_stats, "away")}{away_extra}
 
 STATISTICAL MODEL ESTIMATE: {home} win probability = {base_prob:.1%}
 {missing_note}
 Apply your framework above to this data and estimate win probability. Weigh all relevant factors together — no single factor should dominate unless the data is overwhelmingly one-sided. In your reasoning, explain your logic naturally; do NOT cite rule numbers or use phrases like "per the framework" or "Framework #1".
 
-CRITICAL PLAYER DATA RULE: Your reasoning may ONLY name specific players who appear in the roster or injury list provided above. Do NOT name any player from your training data who is not listed — rosters change constantly and your training data is stale. If a player you recall is not in the data above, they may have been traded, cut, or retired. Mentioning a player not in the provided data is a factual error. Base all player-specific claims strictly on the lists above.
+{player_rule}
 
 Respond ONLY with valid JSON in this exact format:
 {{
