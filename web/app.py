@@ -132,6 +132,7 @@ async def index(request: Request):
 
     closed = [_prepare_bet(b) for b in state["closed_bets"]]
     closed.sort(key=lambda b: b.get("commence_time", ""), reverse=True)
+    closed_log = [b for b in closed if b.get("status") != "void"]
 
     open_bets = [_prepare_bet(b) for b in state["open_bets"]]
 
@@ -232,7 +233,7 @@ async def index(request: Request):
         name="index.html",
         context={
             "stats":           stats,
-            "closed_bets":     closed,
+            "closed_bets":     closed_log,
             "open_bets":       open_bets,
             "sport_stats":     sport_stats,
             "bankroll_labels": json.dumps(bankroll_labels),
