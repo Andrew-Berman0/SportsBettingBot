@@ -74,11 +74,14 @@ class ResultsFetcher:
                 logger.warning(f"ResultsFetcher error for {sport} {date}: {e}")
         return results
 
+    _VOID_STATUSES = {"STATUS_POSTPONED", "STATUS_CANCELED", "STATUS_SUSPENDED"}
+
     def settle_open_bets(self, broker) -> int:
         """
         Checks ESPN for completed games, settles any matching open bets.
+        Also detects postponed/cancelled games and voids those bets (stake refunded).
         Handles all sports that have open bets.
-        Returns the number of bets settled.
+        Returns the number of bets settled or voided.
         """
         if not broker.open_bets:
             return 0
@@ -110,32 +113,75 @@ class ResultsFetcher:
                         pass
             days_back = min(days_back, 30)
 
-            completed = self.get_completed_games(days_back=days_back, sport=sport)
-            if not completed:
-                continue
+            league_sport, league = SPORT_ESPN_MAP[sport]
+            url = f"https://site.api.espn.com/apis/site/v2/sports/{league_sport}/{league}/scoreboard"
 
-            for result in completed:
-                matching = [
-                    b for b in sport_bets
-                    if self._teams_match(b["home_team"], result["home_team"])
-                    and self._teams_match(b["away_team"], result["away_team"])
-                    and self._game_has_started(b.get("commence_time"), now)
-                    and self._result_date_matches(result["date"], b.get("commence_time"))
-                ]
-                if not matching:
-                    continue
+            for days_ago in range(days_back + 1):
+                date = (now - timedelta(days=days_ago)).strftime("%Y%m%d")
+                try:
+                    resp = self.session.get(url, params={"dates": date}, timeout=10)
+                    resp.raise_for_status()
+                    for event in resp.json().get("events", []):
+                        comp   = event.get("competitions", [{}])[0]
+                        status = comp.get("status", {}).get("type", {})
+                        home, away = None, None
+                        for team in comp.get("competitors", []):
+                            info = {
+                                "name":  team["team"]["displayName"],
+                                "score": int(team.get("score") or 0),
+                            }
+                            if team["homeAway"] == "home":
+                                home = info
+                            else:
+                                away = info
+                        if not home or not away:
+                            continue
 
-                game_id = matching[0]["game_id"]
-                logger.info(
-                    f"Settling {result['away_team']} @ {result['home_team']} "
-                    f"({result['away_score']}-{result['home_score']}) [{sport}]"
-                )
-                settled = broker.settle_bet(
-                    game_id=game_id,
-                    home_score=result["home_score"],
-                    away_score=result["away_score"],
-                )
-                settled_count += len(settled)
+                        result_date = date[:4] + "-" + date[4:6] + "-" + date[6:]
+
+                        if status.get("completed"):
+                            # Normal settlement
+                            matching = [
+                                b for b in sport_bets
+                                if self._teams_match(b["home_team"], home["name"])
+                                and self._teams_match(b["away_team"], away["name"])
+                                and self._game_has_started(b.get("commence_time"), now)
+                                and self._result_date_matches(result_date, b.get("commence_time"))
+                            ]
+                            if matching:
+                                game_id = matching[0]["game_id"]
+                                logger.info(
+                                    f"Settling {away['name']} @ {home['name']} "
+                                    f"({away['score']}-{home['score']}) [{sport}]"
+                                )
+                                settled = broker.settle_bet(
+                                    game_id=game_id,
+                                    home_score=home["score"],
+                                    away_score=away["score"],
+                                )
+                                settled_count += len(settled)
+                                sport_bets = [b for b in sport_bets if b["game_id"] != game_id]
+
+                        elif status.get("name") in self._VOID_STATUSES:
+                            # Postponed / cancelled — void the bet
+                            matching = [
+                                b for b in sport_bets
+                                if self._teams_match(b["home_team"], home["name"])
+                                and self._teams_match(b["away_team"], away["name"])
+                                and self._result_date_matches(result_date, b.get("commence_time"))
+                            ]
+                            if matching:
+                                game_id = matching[0]["game_id"]
+                                reason  = status["name"].replace("STATUS_", "").lower()
+                                logger.info(
+                                    f"Voiding {away['name']} @ {home['name']} — {reason} [{sport}]"
+                                )
+                                voided = broker.void_bet(game_id=game_id, reason=reason)
+                                settled_count += len(voided)
+                                sport_bets = [b for b in sport_bets if b["game_id"] != game_id]
+
+                except Exception as e:
+                    logger.warning(f"ResultsFetcher error for {sport} {date}: {e}")
 
         return settled_count
 

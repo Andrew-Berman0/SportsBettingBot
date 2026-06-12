@@ -104,6 +104,12 @@ def _prepare_bet(bet: dict) -> dict:
         hs = b.get("home_score")
         as_ = b.get("away_score")
         b["score_str"] = f"{b['home_team']} {hs}, {b['away_team']} {as_}" if hs is not None else ""
+    elif b.get("status") == "void":
+        b["won"]          = None
+        b["pnl"]          = 0.0
+        b["pnl_str"]      = "—"
+        b["settled_date"] = _fmt_date(b.get("settled_at", ""))
+        b["score_str"]    = b.get("void_reason", "postponed").upper()
     return b
 
 
@@ -177,13 +183,14 @@ async def index(request: Request):
         })
     upcoming_games.sort(key=lambda g: g.get("commence_time", ""))
 
-    # Overall stats
-    total_staked = sum(b["stake"] for b in closed)
+    # Overall stats (void bets excluded from record and staked totals)
+    decided      = [b for b in closed if b.get("status") in ("won", "lost")]
+    total_staked = sum(b["stake"] for b in decided)
     total_pnl    = sum(b["pnl"] for b in closed)
-    wins         = sum(1 for b in closed if b["won"])
-    losses       = len(closed) - wins
+    wins         = sum(1 for b in decided if b["won"])
+    losses       = len(decided) - wins
     roi          = (total_pnl / total_staked * 100) if total_staked else 0.0
-    win_rate     = (wins / len(closed) * 100) if closed else 0.0
+    win_rate     = (wins / len(decided) * 100) if decided else 0.0
 
     stats = {
         "bankroll":   state["bankroll"],
@@ -210,13 +217,14 @@ async def index(request: Request):
     pnl_values = [round(b["pnl"], 2) for b in history_bets]
     pnl_colors = ["#39FF14" if v >= 0 else "#ff4444" for v in pnl_values]
 
-    # Per-sport breakdown
+    # Per-sport breakdown (void bets contribute to pnl=0 but not win/loss record)
     sport_stats: dict[str, dict] = {}
     for b in closed:
         sl = b["sport_label"]
         if sl not in sport_stats:
             sport_stats[sl] = {"wins": 0, "losses": 0, "pnl": 0.0}
-        sport_stats[sl]["wins" if b["won"] else "losses"] += 1
+        if b.get("status") in ("won", "lost"):
+            sport_stats[sl]["wins" if b["won"] else "losses"] += 1
         sport_stats[sl]["pnl"] += b["pnl"]
 
     return templates.TemplateResponse(

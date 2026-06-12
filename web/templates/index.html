@@ -472,14 +472,17 @@
               <td class="px-5 py-3 font-mono text-[#d1d5db] text-xs">{{ bet.odds_str }}</td>
               <td class="px-5 py-3 text-[#c9d1d9] text-xs">{{ bet.stake_str }}</td>
               <td class="px-5 py-3">
-                {% if bet.won %}
+                {% if bet.won is none %}
+                <span class="text-xs font-semibold px-2 py-0.5 rounded border"
+                      style="background:rgba(251,191,36,0.1);color:#fbbf24;border-color:rgba(251,191,36,0.35)">VOID</span>
+                {% elif bet.won %}
                 <span class="text-xs font-semibold px-2 py-0.5 rounded border"
                       style="background:rgba(57,255,20,0.1);color:#39FF14;border-color:rgba(57,255,20,0.25)">WIN</span>
                 {% else %}
                 <span class="text-xs font-semibold px-2 py-0.5 rounded border bg-red-500/10 text-red-400 border-red-500/25">LOSS</span>
                 {% endif %}
               </td>
-              <td class="px-5 py-3 font-medium text-sm" style="color:{{ '#39FF14' if bet.won else '#ff4444' }}">
+              <td class="px-5 py-3 font-medium text-sm" style="color:{{ '#39FF14' if bet.won else ('#fbbf24' if bet.won is none else '#ff4444') }}">
                 {{ bet.pnl_str }}
               </td>
             </tr>

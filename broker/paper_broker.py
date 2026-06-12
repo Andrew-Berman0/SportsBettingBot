@@ -118,6 +118,29 @@ class PaperBroker:
         self._save()
         return settled
 
+    def void_bet(self, game_id: str, reason: str = "postponed") -> list:
+        """Void open bets for a game — stake refunded, moved to closed with status 'void'."""
+        voided = []
+        remaining = []
+        for bet in self.open_bets:
+            if bet["game_id"] != game_id:
+                remaining.append(bet)
+                continue
+            bet["status"]      = "void"
+            bet["settled_at"]  = datetime.now(timezone.utc).isoformat()
+            bet["pnl"]         = 0.0
+            bet["void_reason"] = reason
+            self.bankroll     += bet["stake"]   # refund stake
+            logger.info(
+                f"BET VOIDED: {bet['away_team']} @ {bet['home_team']} | "
+                f"{bet['bet_type']} | Reason: {reason} | Stake refunded: ${bet['stake']:.2f}"
+            )
+            voided.append(bet)
+        self.open_bets    = remaining
+        self.closed_bets.extend(voided)
+        self._save()
+        return voided
+
     def record_pass(
         self,
         game_id:          str,
