@@ -453,29 +453,36 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     logger.info(f"  Reasoning: {analysis['reasoning']}")
 
     min_edge   = CONFIG.bankroll.min_edge_by_sport.get(sport, CONFIG.bankroll.min_edge)
+    min_odds   = CONFIG.bankroll.min_odds   # skip heavy favorites (odds more negative than this)
     claude_rec = analysis["bet_recommendation"]
 
     stake = round(broker.bankroll * CONFIG.bankroll.flat_bet_pct, 2)
     logger.info(f"  Flat stake: ${stake:.2f} ({CONFIG.bankroll.flat_bet_pct:.1%} of bankroll)")
 
+    home_ml = game.get("home_ml")
+    away_ml = game.get("away_ml")
     bet_placed = False
-    if home_edge >= min_edge and claude_rec == "home_ml" and game.get("home_ml") is not None:
-        if stake >= 5.0:
+    if home_edge >= min_edge and claude_rec == "home_ml" and home_ml is not None:
+        if home_ml < min_odds:
+            logger.info(f"  Skipping {home_team} — odds {home_ml:.0f} past min_odds ({min_odds:.0f}); favorite too heavy")
+        elif stake >= 5.0:
             broker.place_bet(
                 game_id=game["game_id"], sport=sport,
                 home_team=home_team, away_team=away_team,
-                bet_type="home_ml", odds=game["home_ml"], stake=stake,
+                bet_type="home_ml", odds=home_ml, stake=stake,
                 reasoning=analysis["reasoning"],
                 claude_home_prob=our_home_prob, book_home_prob=book_home_prob,
                 features=features, commence_time=game.get("commence_time"),
             )
             bet_placed = True
-    elif away_edge >= min_edge and claude_rec == "away_ml" and game.get("away_ml") is not None:
-        if stake >= 5.0:
+    elif away_edge >= min_edge and claude_rec == "away_ml" and away_ml is not None:
+        if away_ml < min_odds:
+            logger.info(f"  Skipping {away_team} — odds {away_ml:.0f} past min_odds ({min_odds:.0f}); favorite too heavy")
+        elif stake >= 5.0:
             broker.place_bet(
                 game_id=game["game_id"], sport=sport,
                 home_team=home_team, away_team=away_team,
-                bet_type="away_ml", odds=game["away_ml"], stake=stake,
+                bet_type="away_ml", odds=away_ml, stake=stake,
                 reasoning=analysis["reasoning"],
                 claude_home_prob=our_home_prob, book_home_prob=book_home_prob,
                 features=features, commence_time=game.get("commence_time"),
