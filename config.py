@@ -38,7 +38,7 @@ class ModelConfig:
 
 @dataclass
 class ClaudeConfig:
-    model: str = "claude-opus-4-7"
+    model: str = "claude-sonnet-4-6"
     max_tokens: int = 1024
     api_key: str = field(default_factory=lambda: os.getenv("ANTHROPIC_API_KEY", ""))
 
