@@ -17,17 +17,35 @@ import anthropic
 
 logger = logging.getLogger(__name__)
 
-# Analyst version — stamped on every bet/pass at evaluation time and carried into
-# game_outcomes.jsonl, so calibration analyses can be filtered to the exact logic
-# that produced each result. BUMP THIS on any notable change to a persona/framework,
-# the model, or edge thresholds, and add a line to the changelog below.
+# Per-analyst version. Each sport's persona is effectively its own analyst, so
+# versions are tracked PER SPORT — bump ONLY the sport whose persona/framework/edge
+# logic you changed, and add a changelog line. Stamped on each bet/pass at
+# evaluation time (via analyst_version_for) and carried into game_outcomes.jsonl,
+# so every sport's calibration history segments by its own logic version.
+# A change that affects everyone (e.g. swapping the model) means bumping every entry.
 #
-#   1 — 2026-06-13: First versioned analyst. MLB persona reoriented (season
-#       team-quality stats treated as already priced; no home-team fades on
-#       aggregates; concrete game-specific edge required) and MLB min_edge 3%->5%.
-#       Model: Sonnet 4.6. Outcomes logged before this have no analyst_version.
+# Changelog:
+#   baseball_mlb=1 (2026-06-13): first versioned MLB persona — season team-quality
+#       stats treated as already priced, no home-team fades on aggregates, concrete
+#       game-specific edge required; MLB min_edge 3%->5%.
+#   all others=1 (2026-06-13): first versioned state of each persona (unchanged at
+#       versioning introduction). Model: Sonnet 4.6 across all. Outcomes logged
+#       before this carry no analyst_version.
 #
-ANALYST_VERSION = 1
+ANALYST_VERSIONS: dict[str, int] = {
+    "basketball_nba":        1,
+    "basketball_wnba":       1,
+    "americanfootball_nfl":  1,
+    "baseball_mlb":          1,
+    "icehockey_nhl":         1,
+    "soccer_fifa_world_cup": 1,
+    "mma_ufc":               1,
+}
+
+
+def analyst_version_for(sport: str) -> int:
+    """Version of the analyst (persona) for a sport — stamped on its bets/passes."""
+    return ANALYST_VERSIONS.get(sport, 1)
 
 # Sport-specific analyst personas injected at the top of every prompt.
 # Role shapes how Claude frames the problem; framework sets the priority order
