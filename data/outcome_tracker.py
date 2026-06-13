@@ -84,6 +84,7 @@ class OutcomeTracker:
                 "home_won":         home_won,
                 "edge_side":        edge_side,
                 "claude_correct":   (edge_side == "home") == home_won,
+                "analyst_version":  bet.get("analyst_version"),
             })
             written += 1
         return written
@@ -155,6 +156,7 @@ class OutcomeTracker:
                     "home_won":         home_won,
                     "edge_side":        edge_side,
                     "claude_correct":   correct,
+                    "analyst_version":  g.get("analyst_version"),
                 })
                 written += 1
         return written

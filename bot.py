@@ -44,7 +44,7 @@ from SportsBettingBot.data.roster_fetcher import RosterFetcher
 from SportsBettingBot.data.results_fetcher import ResultsFetcher
 from SportsBettingBot.data.outcome_tracker import OutcomeTracker
 from SportsBettingBot.features.engineer import FeatureEngineer
-from SportsBettingBot.models.claude_analyst import ClaudeAnalyst
+from SportsBettingBot.models.claude_analyst import ClaudeAnalyst, ANALYST_VERSION
 from SportsBettingBot.broker.paper_broker import PaperBroker
 from SportsBettingBot.notifications import push_notifier
 
@@ -473,6 +473,7 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
                 reasoning=analysis["reasoning"],
                 claude_home_prob=our_home_prob, book_home_prob=book_home_prob,
                 features=features, commence_time=game.get("commence_time"),
+                analyst_version=ANALYST_VERSION,
             )
             bet_placed = True
     elif away_edge >= min_edge and claude_rec == "away_ml" and away_ml is not None:
@@ -486,6 +487,7 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
                 reasoning=analysis["reasoning"],
                 claude_home_prob=our_home_prob, book_home_prob=book_home_prob,
                 features=features, commence_time=game.get("commence_time"),
+                analyst_version=ANALYST_VERSION,
             )
             bet_placed = True
     elif claude_rec == "pass" and (home_edge >= min_edge or away_edge >= min_edge):
@@ -504,6 +506,7 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
             claude_home_prob=our_home_prob, book_home_prob=book_home_prob,
             home_edge=home_edge, away_edge=away_edge,
             home_ml=game.get("home_ml"), away_ml=game.get("away_ml"),
+            analyst_version=ANALYST_VERSION,
         )
 
 

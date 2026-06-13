@@ -17,6 +17,18 @@ import anthropic
 
 logger = logging.getLogger(__name__)
 
+# Analyst version — stamped on every bet/pass at evaluation time and carried into
+# game_outcomes.jsonl, so calibration analyses can be filtered to the exact logic
+# that produced each result. BUMP THIS on any notable change to a persona/framework,
+# the model, or edge thresholds, and add a line to the changelog below.
+#
+#   1 — 2026-06-13: First versioned analyst. MLB persona reoriented (season
+#       team-quality stats treated as already priced; no home-team fades on
+#       aggregates; concrete game-specific edge required) and MLB min_edge 3%->5%.
+#       Model: Sonnet 4.6. Outcomes logged before this have no analyst_version.
+#
+ANALYST_VERSION = 1
+
 # Sport-specific analyst personas injected at the top of every prompt.
 # Role shapes how Claude frames the problem; framework sets the priority order
 # for what actually drives outcomes in that sport.

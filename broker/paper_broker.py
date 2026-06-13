@@ -49,6 +49,7 @@ class PaperBroker:
         book_home_prob:   float | None = None,   # bookmaker's implied home prob
         features:         dict | None = None,    # feature snapshot for model training
         commence_time:    str | None = None,     # ISO-8601 game start time
+        analyst_version:  int | None = None,     # analyst logic version at eval time
     ) -> dict:
         """Place a paper bet. Returns the bet record."""
         if stake > self.bankroll:
@@ -72,6 +73,7 @@ class PaperBroker:
             "claude_home_prob": claude_home_prob,
             "book_home_prob":   book_home_prob,
             "features":        features or {},
+            "analyst_version": analyst_version,
         }
         self.bankroll -= stake
         self.open_bets.append(bet)
@@ -155,6 +157,7 @@ class PaperBroker:
         away_edge:        float,
         home_ml:          float | None = None,
         away_ml:          float | None = None,
+        analyst_version:  int | None = None,
     ) -> None:
         self.passed_games.append({
             "game_id":          game_id,
@@ -169,6 +172,7 @@ class PaperBroker:
             "away_edge":        round(away_edge, 4),
             "home_ml":          home_ml,
             "away_ml":          away_ml,
+            "analyst_version":  analyst_version,
             "passed_at":        datetime.now(timezone.utc).isoformat(),
         })
         # Keep only last 7 days to avoid unbounded growth
