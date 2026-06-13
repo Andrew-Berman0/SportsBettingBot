@@ -66,6 +66,11 @@ def _send(title: str, body: str, admin_only: bool = False) -> None:
         logger.warning(f"Push notification failed: {e}")
 
 
+def notify_admin(title: str, body: str) -> None:
+    """Admin-only push (same player id as the data-gap alerts)."""
+    _send(title=title, body=body, admin_only=True)
+
+
 def notify_data_missing(matchup: str, sport_label: str, missing: list[str]) -> None:
     if not missing:
         return
