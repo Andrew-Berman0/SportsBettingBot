@@ -19,7 +19,7 @@ class BankrollConfig:
         "basketball_nba":        0.03,
         "basketball_wnba":       0.03,
         "americanfootball_nfl":  0.03,
-        "baseball_mlb":          0.03,
+        "baseball_mlb":          0.05,   # 3-5% edges hit <50% historically; require stronger conviction
         "icehockey_nhl":         0.03,
         "soccer_fifa_world_cup": 0.04,
         "mma_ufc":               0.05,   # high variance — demand a larger edge
