@@ -47,6 +47,8 @@ class PaperBroker:
         reasoning:       str = "",
         claude_home_prob: float | None = None,   # our estimated home win prob
         book_home_prob:   float | None = None,   # bookmaker's implied home prob
+        home_edge:        float | None = None,   # our edge on home side
+        away_edge:        float | None = None,   # our edge on away side
         features:         dict | None = None,    # feature snapshot for model training
         commence_time:    str | None = None,     # ISO-8601 game start time
         analyst_version:  int | None = None,     # analyst logic version at eval time
@@ -72,6 +74,8 @@ class PaperBroker:
             "reasoning":   reasoning,
             "claude_home_prob": claude_home_prob,
             "book_home_prob":   book_home_prob,
+            "home_edge":        home_edge,
+            "away_edge":        away_edge,
             "features":        features or {},
             "analyst_version": analyst_version,
         }
