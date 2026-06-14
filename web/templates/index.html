@@ -166,7 +166,14 @@
               </svg>
               <span id="push-label">Get pick notifications</span>
             </button>
-            <p id="ios-hint" class="hidden text-[10px] text-[#6b7280] text-center leading-snug max-w-[160px]"></p>
+            <div id="ios-hint" class="hidden text-right">
+              <p class="text-[10px] text-[#6b7280] leading-snug mb-1.5">
+                Tap <strong class="text-[#9ca3af]">Share</strong> → <strong class="text-[#9ca3af]">Add to Home Screen</strong>, then reopen WWAID to enable notifications.
+              </p>
+              <img src="/static/ios-homescreen-hint.png" alt="Add to Home Screen location"
+                   class="rounded-lg w-full max-w-[200px] ml-auto"
+                   style="border:1px solid rgba(255,255,255,0.1);">
+            </div>
             <button onclick="bookmarkPage()" id="bookmark-btn"
                     class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all w-full justify-center"
                     style="background:#39FF1412;color:#39FF14;border-color:#39FF1440;">
@@ -674,12 +681,9 @@
     }
 
     function _showIOSHint() {
-      const hint = document.getElementById('ios-hint');
+      const hint  = document.getElementById('ios-hint');
       const label = document.getElementById('push-label');
-      if (hint) {
-        hint.textContent = 'Tap the Share button then "Add to Home Screen". Open WWAID from your home screen to enable notifications.';
-        hint.classList.remove('hidden');
-      }
+      if (hint)  hint.classList.remove('hidden');
       if (label) label.textContent = 'iPhone requires home screen app';
     }
 
