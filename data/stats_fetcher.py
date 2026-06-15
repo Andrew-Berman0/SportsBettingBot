@@ -429,11 +429,28 @@ class NHLStatsFetcher:
 
     _TEAM_URL   = "https://api.nhle.com/stats/rest/en/team/summary"
     _GOALIE_URL = "https://api.nhle.com/stats/rest/en/goalie/summary"
+    _TEAMS_URL  = "https://api.nhle.com/stats/rest/en/team"
     _CACHE_TTL_HOURS = 6
 
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "Mozilla/5.0"})
+        self._abbrev_map: dict | None = None  # teamId -> triCode (summary endpoint dropped its abbrev field)
+
+    def _team_abbrev_map(self) -> dict:
+        """teamId -> triCode. The team/summary endpoint no longer carries an
+        abbreviation, but the goalie merge and rest-days lookups key on it."""
+        if self._abbrev_map is None:
+            self._abbrev_map = {}
+            try:
+                r = self.session.get(self._TEAMS_URL, timeout=10)
+                r.raise_for_status()
+                for t in r.json().get("data", []):
+                    if t.get("id") is not None and t.get("triCode"):
+                        self._abbrev_map[t["id"]] = t["triCode"]
+            except Exception as e:
+                logger.warning(f"NHL team abbrev map fetch failed: {e}")
+        return self._abbrev_map
 
     def get_team_stats(self, season: str | None = None) -> pd.DataFrame:
         """
@@ -497,14 +514,16 @@ class NHLStatsFetcher:
         try:
             r = self.session.get(self._TEAM_URL, params=params, timeout=10)
             r.raise_for_status()
+            abbrev_map = self._team_abbrev_map()
             rows = []
             for t in r.json().get("data", []):
                 rows.append({
                     "team":             t.get("teamFullName"),
-                    "nhl_abbrev":       t.get("teamAbbrevs") or t.get("teamAbbrev"),
+                    "nhl_abbrev":       abbrev_map.get(t.get("teamId")),
                     "nhl_gp":           t.get("gamesPlayed"),
-                    "pp_pct":           t.get("ppPct"),
-                    "pk_pct":           t.get("pkPct"),
+                    # API now returns these as fractions (0.205); the prompt expects a percent number.
+                    "pp_pct":           (t.get("powerPlayPct")   * 100) if t.get("powerPlayPct")   is not None else None,
+                    "pk_pct":           (t.get("penaltyKillPct") * 100) if t.get("penaltyKillPct") is not None else None,
                     "shots_for_pg":     t.get("shotsForPerGame"),
                     "shots_against_pg": t.get("shotsAgainstPerGame"),
                 })
@@ -529,7 +548,7 @@ class NHLStatsFetcher:
                 rows.append({
                     "nhl_abbrev":   g.get("teamAbbrevs") or g.get("teamAbbrev"),
                     "goalie_name":  g.get("goalieFullName"),
-                    "goalie_sv_pct": g.get("savePctg"),
+                    "goalie_sv_pct": g.get("savePct"),
                     "goalie_gaa":   g.get("goalsAgainstAverage"),
                     "goalie_gp":    g.get("gamesStarted") or g.get("gamesPlayed") or 0,
                 })
