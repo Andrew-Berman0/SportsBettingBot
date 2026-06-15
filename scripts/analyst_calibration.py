@@ -40,6 +40,8 @@ def _stats(records: list) -> dict:
     out["home_win_rate"]   = hw / n
     out["avg_claude_home"] = sum(r["claude_home_prob"] for r in records) / n
     out["avg_market_home"] = sum(r["book_home_prob"] for r in records) / n
+    out["avg_divergence"]  = sum(abs(r["claude_home_prob"] - r["book_home_prob"]) for r in records) / n
+    out["big_divergence"]  = sum(1 for r in records if abs(r["claude_home_prob"] - r["book_home_prob"]) > 0.10)
     out["brier_claude"]    = sum((r["claude_home_prob"] - r["home_won"]) ** 2 for r in records) / n
     out["brier_market"]    = sum((r["book_home_prob"]  - r["home_won"]) ** 2 for r in records) / n
     out["acc_claude"]      = sum(1 for r in records if (r["claude_home_prob"] > 0.5) == r["home_won"]) / n
@@ -75,6 +77,7 @@ def _print_group(label: str, s: dict) -> None:
         return
     better = "Claude better" if s["brier_claude"] < s["brier_market"] else "market better"
     print(f"    Home bias : Claude {s['avg_claude_home']:.0%} | market {s['avg_market_home']:.0%} | actual {s['home_win_rate']:.0%}")
+    print(f"    Divergence: avg |Claude-market| {s['avg_divergence']:.0%} | >10pt divergences: {s['big_divergence']}/{s['n']}")
     print(f"    Brier     : Claude {s['brier_claude']:.4f} | market {s['brier_market']:.4f}  ({better})")
     print(f"    Pick-win  : Claude {s['acc_claude']:.0%} | market {s['acc_market']:.0%}")
     hl = f"{s['home_lean_acc']:.0%}" if s["home_lean_acc"] is not None else "—"

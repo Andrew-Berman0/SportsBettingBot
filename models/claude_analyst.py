@@ -28,6 +28,10 @@ logger = logging.getLogger(__name__)
 #   baseball_mlb=1 (2026-06-13): first versioned MLB persona — season team-quality
 #       stats treated as already priced, no home-team fades on aggregates, concrete
 #       game-specific edge required; MLB min_edge 3%->5%.
+#   baseball_mlb=2 (2026-06-14): added magnitude discipline — v1 required a concrete
+#       edge but didn't cap how far it could move the number, producing implausible
+#       ~19pt single-game divergences from over-weighting starter/bullpen ERA. Now
+#       caps deviation at ~8-10 points absent a roster-level mismatch.
 #   all others=1 (2026-06-13): first versioned state of each persona (unchanged at
 #       versioning introduction). Model: Sonnet 4.6 across all. Outcomes logged
 #       before this carry no analyst_version.
@@ -36,7 +40,7 @@ ANALYST_VERSIONS: dict[str, int] = {
     "basketball_nba":        1,
     "basketball_wnba":       1,
     "americanfootball_nfl":  1,
-    "baseball_mlb":          1,
+    "baseball_mlb":          2,
     "icehockey_nhl":         1,
     "soccer_fifa_world_cup": 1,
     "mma_ufc":               1,
@@ -74,8 +78,9 @@ _ANALYST_PERSONAS: dict[str, dict[str, str]] = {
             "4. Do NOT fade the home team just because the road team has better aggregate season stats. The market prices home field and team quality efficiently — a road team that looks better on paper is usually already reflected in the line. Treat Home/Road records as context, not a reason to override the market.\n"
             "5. Streaks and momentum regress hard in baseball. Be skeptical of hot/cold narratives.\n"
             "6. To take a side you need a CONCRETE, game-specific reason the market line is wrong: a clear starting-pitcher mismatch (over a believable sample, not 1-2 starts), a confirmed key injury or lineup absence, or a distinct bullpen edge in a likely-close game. Without a specific reason like that, defer to the market and pass.\n"
-            "7. Beware small-sample ERAs early in the season — a 9.00 or a 1.50 ERA over a couple starts is mostly noise; weight it far less than it looks.\n"
-            "8. Default to 'pass' when the edge is below 5%, when factors conflict, or when your lean rests mainly on season team-quality aggregates rather than a specific game-level edge."
+            "7. MAGNITUDE DISCIPLINE — this is critical. MLB single-game win probabilities are compressed: even the best team vs the worst rarely prices beyond ~65/35, and an ERA edge between two real MLB starters is worth only a few points. Even a clear starter AND bullpen edge rarely justifies moving the game's win probability more than ~8-10 points away from the market's implied number. If your estimate diverges from the market by more than ~10 points, that is a red flag that you are overweighting ERA — pull back toward the market unless there is a roster-level mismatch (a genuine ace facing a replacement-level call-up). The market already prices the starters and bullpens; your edge is at the margin, not a wholesale repricing.\n"
+            "8. Beware small-sample ERAs early in the season — a 9.00 or a 1.50 ERA over a couple starts is mostly noise; weight it far less than it looks.\n"
+            "9. Default to 'pass' when the edge is below 5%, when factors conflict, or when your lean rests mainly on season team-quality aggregates rather than a specific game-level edge."
         ),
     },
     "icehockey_nhl": {
