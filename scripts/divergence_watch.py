@@ -28,7 +28,11 @@ from SportsBettingBot.notifications import push_notifier
 
 WINDOW    = 15     # each sport's most recent N evaluated games
 MIN_GAMES = 10     # need at least this many to judge
-THRESHOLD = 0.20   # alert if >=20% of recent games diverged >10pt from market
+# Alert only on an EGREGIOUS spike — above where healthy sports currently sit
+# (NBA/WNBA ~20%, MLB ~13%). Divergence alone can't tell good divergence (NBA's
+# winning playoff calls) from bad (MLB's losing ERA bets), so this is a coarse
+# "go look" trigger, not a verdict. Tune as more data accrues.
+THRESHOLD = 0.30
 STATE     = REPO / "data" / "raw" / ".divergence_watch_state.json"
 
 
