@@ -60,8 +60,19 @@ def _send(title: str, body: str, admin_only: bool = False) -> None:
     try:
         r = requests.post(_API_URL, json=payload, headers=headers, timeout=10)
         r.raise_for_status()
-        recipients = r.json().get("recipients", 0)
-        logger.info(f"Push sent to {recipients} subscriber(s): {title}")
+        data = r.json()
+        # OneSignal returns HTTP 200 even when a push reaches nobody (e.g. a stale
+        # player id -> {"errors": ["All included players are not subscribed"]}).
+        # Surface that loudly instead of masking it as "0 subscribers".
+        errors = data.get("errors")
+        if errors:
+            logger.warning(f"Push NOT delivered ({title}): {errors}")
+        elif not data.get("id"):
+            logger.warning(f"Push returned no id ({title}): {data}")
+        else:
+            recipients = data.get("recipients")
+            who = f"{recipients} subscriber(s)" if recipients is not None else "targeted device"
+            logger.info(f"Push sent to {who}: {title}")
     except Exception as e:
         logger.warning(f"Push notification failed: {e}")
 
