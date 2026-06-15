@@ -208,6 +208,7 @@ class ESPNStatsFetcher:
         self.session.headers.update({"User-Agent": "Mozilla/5.0"})
         self._series_cache: dict = {}  # {(sport_key, home_nick, away_nick): (ts, str|None)}
         self._throws_cache: dict = {}  # {athlete_id: "L"|"R"|None}
+        self._rates_cache:  dict = {}  # {athlete_id: {ip, gs, whip, k9, kbb}}
 
     def get_team_stats(self, sport_key: str) -> pd.DataFrame:
         """Returns basic team stats (win%, point diff) for the given sport."""
@@ -339,15 +340,15 @@ class ESPNStatsFetcher:
                                     p = probs[0]
                                     stats = {s["abbreviation"]: s["displayValue"]
                                              for s in p.get("statistics", [])}
+                                    aid = p.get("athlete", {}).get("id")
                                     result[side] = {
                                         "name":   p.get("athlete", {}).get("fullName", "TBD"),
                                         "record": p.get("record", ""),
                                         "era":    stats.get("ERA", "?"),
                                         "wins":   stats.get("W", "?"),
                                         "losses": stats.get("L", "?"),
-                                        "throws": self._fetch_pitcher_throws(
-                                            p.get("athlete", {}).get("id")
-                                        ),
+                                        "throws": self._fetch_pitcher_throws(aid),
+                                        **self._fetch_pitcher_rates(aid),
                                     }
                                 else:
                                     result[side] = {"name": "TBD", "record": "", "era": "?"}
@@ -382,6 +383,39 @@ class ESPNStatsFetcher:
             logger.debug(f"Pitcher handedness fetch error ({aid}): {e}")
         self._throws_cache[aid] = hand
         return hand
+
+    def _fetch_pitcher_rates(self, athlete_id) -> dict:
+        """Season pitching peripherals for an ESPN athlete id: IP/GS (sample size)
+        and WHIP/K9/K-BB (whether the ERA is earned). Cached in memory."""
+        if not athlete_id:
+            return {}
+        aid = str(athlete_id)
+        if aid in self._rates_cache:
+            return self._rates_cache[aid]
+        rates: dict = {}
+        try:
+            year = datetime.today().year
+            r = self.session.get(
+                f"{self._CORE_BASE}/baseball/leagues/mlb/seasons/{year}/types/2/athletes/{aid}/statistics",
+                timeout=10,
+            )
+            r.raise_for_status()
+            for cat in r.json().get("splits", {}).get("categories", []):
+                if cat.get("name") != "pitching":
+                    continue
+                m = {x.get("name"): x.get("displayValue") for x in cat.get("stats", [])}
+                rates = {
+                    "ip":   m.get("innings"),
+                    "gs":   m.get("gamesStarted"),
+                    "whip": m.get("WHIP"),
+                    "k9":   m.get("strikeoutsPerNineInnings"),
+                    "kbb":  m.get("strikeoutToWalkRatio"),
+                }
+                break
+        except Exception as e:
+            logger.debug(f"Pitcher rates fetch error ({aid}): {e}")
+        self._rates_cache[aid] = rates
+        return rates
 
 
 class NHLStatsFetcher:

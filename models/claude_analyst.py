@@ -28,10 +28,16 @@ logger = logging.getLogger(__name__)
 #   baseball_mlb=1 (2026-06-13): first versioned MLB persona — season team-quality
 #       stats treated as already priced, no home-team fades on aggregates, concrete
 #       game-specific edge required; MLB min_edge 3%->5%.
-#   baseball_mlb=2 (2026-06-14): added magnitude discipline — v1 required a concrete
-#       edge but didn't cap how far it could move the number, producing implausible
-#       ~19pt single-game divergences from over-weighting starter/bullpen ERA. Now
-#       caps deviation at ~8-10 points absent a roster-level mismatch.
+#   baseball_mlb=2 (2026-06-14): two-part fix for ERA over-weighting that produced
+#       implausible ~19pt single-game divergences.
+#       (a) magnitude discipline — v1 required a concrete edge but didn't cap how far
+#           it could move the number; now caps deviation at ~8-10 points absent a
+#           roster-level mismatch.
+#       (b) starter sample/peripherals — the pitcher line now includes IP/GS and
+#           WHIP/K9/K-BB (from ESPN core) so the small-sample-ERA rule is actionable:
+#           Claude can tell whether an ERA is over 80 IP or 2 starts, and whether the
+#           peripherals support it. (Folded into v2; both shipped before any v2 game
+#           logged, so the sample stays coherent.)
 #   all others=1 (2026-06-13): first versioned state of each persona (unchanged at
 #       versioning introduction). Model: Sonnet 4.6 across all. Outcomes logged
 #       before this carry no analyst_version.
@@ -79,7 +85,7 @@ _ANALYST_PERSONAS: dict[str, dict[str, str]] = {
             "5. Streaks and momentum regress hard in baseball. Be skeptical of hot/cold narratives.\n"
             "6. To take a side you need a CONCRETE, game-specific reason the market line is wrong: a clear starting-pitcher mismatch (over a believable sample, not 1-2 starts), a confirmed key injury or lineup absence, or a distinct bullpen edge in a likely-close game. Without a specific reason like that, defer to the market and pass.\n"
             "7. MAGNITUDE DISCIPLINE — this is critical. MLB single-game win probabilities are compressed: even the best team vs the worst rarely prices beyond ~65/35, and an ERA edge between two real MLB starters is worth only a few points. Even a clear starter AND bullpen edge rarely justifies moving the game's win probability more than ~8-10 points away from the market's implied number. If your estimate diverges from the market by more than ~10 points, that is a red flag that you are overweighting ERA — pull back toward the market unless there is a roster-level mismatch (a genuine ace facing a replacement-level call-up). The market already prices the starters and bullpens; your edge is at the margin, not a wholesale repricing.\n"
-            "8. Beware small-sample ERAs early in the season — a 9.00 or a 1.50 ERA over a couple starts is mostly noise; weight it far less than it looks.\n"
+            "8. Judge the starter's ERA by its sample and peripherals (both are now provided). Use IP/GS for sample size — an ERA over 80+ IP is meaningful, but a shiny or ugly ERA under ~20 IP (1-3 starts) is mostly noise. Cross-check ERA against WHIP, K/9, and K/BB: if the ERA is far better than the peripherals suggest, it is likely lucky and will regress — trust the peripherals over a small-sample ERA when they conflict.\n"
             "9. Default to 'pass' when the edge is below 5%, when factors conflict, or when your lean rests mainly on season team-quality aggregates rather than a specific game-level edge."
         ),
     },
@@ -277,13 +283,24 @@ class ClaudeAnalyst:
                 pitcher = sp.get(side, {})
                 throws = pitcher.get("throws")
                 hand_str = f", {throws}HP" if throws in ("L", "R") else ""
-                pitcher_line = (
-                    f"- Starting pitcher: {pitcher['name']} "
-                    f"({pitcher.get('wins','?')}-{pitcher.get('losses','?')}, "
-                    f"{pitcher.get('era','?')} ERA{hand_str})"
-                    if pitcher.get("name") and pitcher["name"] != "TBD"
-                    else "- Starting pitcher: TBD"
-                )
+                if pitcher.get("name") and pitcher["name"] != "TBD":
+                    extras = []
+                    if pitcher.get("ip"):
+                        extras.append(f"{pitcher['ip']} IP" + (f"/{pitcher['gs']} GS" if pitcher.get("gs") else ""))
+                    if pitcher.get("whip"):
+                        extras.append(f"WHIP {pitcher['whip']}")
+                    if pitcher.get("k9"):
+                        extras.append(f"{pitcher['k9']} K/9")
+                    if pitcher.get("kbb"):
+                        extras.append(f"{pitcher['kbb']} K/BB")
+                    extra_str = ("  [" + " | ".join(extras) + "]") if extras else ""
+                    pitcher_line = (
+                        f"- Starting pitcher: {pitcher['name']} "
+                        f"({pitcher.get('wins','?')}-{pitcher.get('losses','?')}, "
+                        f"{pitcher.get('era','?')} ERA{hand_str}){extra_str}"
+                    )
+                else:
+                    pitcher_line = "- Starting pitcher: TBD"
                 _int  = lambda v: str(int(v))
                 _dec2 = lambda v: f"{v:.2f}"
                 streak_raw = stats.get("streak")
