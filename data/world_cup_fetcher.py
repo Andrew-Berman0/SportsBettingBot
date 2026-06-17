@@ -110,7 +110,8 @@ class WorldCupFetcher:
 
             # ESPN returns explicit null (not a missing key) for moneyline/total/sub-fields
             # on unpriced future games, so guard every level with (x or {}).
-            for o in comp.get("odds", []):
+            for o in (comp.get("odds") or []):
+                o = o or {}
                 ml = o.get("moneyline") or {}
                 home_ml = self._parse_ml(((ml.get("home") or {}).get("close") or {}).get("odds"))
                 away_ml = self._parse_ml(((ml.get("away") or {}).get("close") or {}).get("odds"))
