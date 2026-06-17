@@ -29,6 +29,7 @@ class WorldCupFetcher:
         self.session.headers["User-Agent"] = "Mozilla/5.0"
         self._roster_cache: dict[str, tuple[float, list]] = {}  # team_id → (timestamp, athletes)
         self._team_id_cache: dict[str, str] = {}               # display_name.lower() → team_id
+        self._parse_errors = 0   # events that crashed in _parse_event this fetch (drift signal)
 
     # ------------------------------------------------------------------
     # Odds / upcoming games
@@ -52,6 +53,7 @@ class WorldCupFetcher:
 
         games: list[dict] = []
         seen: set[str] = set()
+        self._parse_errors = 0
         for delta in (0, 1):
             date_str = (now + timedelta(days=delta)).strftime("%Y%m%d")
             try:
@@ -70,9 +72,33 @@ class WorldCupFetcher:
                 logger.error(f"WorldCupFetcher scoreboard error for {date_str}: {e}")
 
         logger.info(f"World Cup: fetched {len(games)} upcoming game(s)")
+        if self._parse_errors:
+            self._alert_parse_errors(self._parse_errors)
         with open(cache_file, "w") as f:
             json.dump(games, f)
         return games
+
+    def _alert_parse_errors(self, n: int) -> None:
+        """Parse-stage drops mean games never reached evaluation (likely ESPN drift).
+        Admin push, deduped to once per UTC day so a persistent issue can't spam."""
+        logger.warning(f"World Cup: {n} event(s) failed to parse — possible ESPN API change")
+        sentinel = CACHE_DIR / ".wc_parse_alert.day"
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        try:
+            if sentinel.read_text().strip() == today:
+                return
+        except Exception:
+            pass
+        try:
+            from SportsBettingBot.notifications import push_notifier
+            push_notifier.notify_admin(
+                "⚠ World Cup parse failures",
+                f"{n} WC event(s) failed to parse and were dropped from evaluation — "
+                f"likely an ESPN API shape change. Check WorldCupFetcher._parse_event.",
+            )
+            sentinel.write_text(today)
+        except Exception as e:
+            logger.warning(f"WC parse-error alert failed: {e}")
 
     def _parse_event(self, event: dict) -> dict | None:
         try:
@@ -172,6 +198,7 @@ class WorldCupFetcher:
                 "venue":         venue_str,
             }
         except Exception as e:
+            self._parse_errors += 1
             logger.warning(f"WorldCupFetcher._parse_event error: {e}")
             return None
 
