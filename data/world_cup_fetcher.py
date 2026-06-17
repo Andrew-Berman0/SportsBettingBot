@@ -76,7 +76,7 @@ class WorldCupFetcher:
 
     def _parse_event(self, event: dict) -> dict | None:
         try:
-            comp = event.get("competitions", [{}])[0]
+            comp = (event.get("competitions") or [{}])[0] or {}
             event_id = str(event["id"])
 
             home_team = away_team = None
@@ -84,10 +84,13 @@ class WorldCupFetcher:
             home_form = away_form = ""
 
             for c in comp.get("competitors", []):
-                name = c["team"]["displayName"]
-                tid = str(c["team"]["id"])
-                form = c.get("form", "")
-                if c["homeAway"] == "home":
+                team = c.get("team") or {}
+                name = team.get("displayName")
+                tid = str(team.get("id")) if team.get("id") is not None else None
+                if not name:
+                    continue
+                form = c.get("form") or ""
+                if c.get("homeAway") == "home":
                     home_team, home_team_id, home_form = name, tid, form
                 else:
                     away_team, away_team_id, away_form = name, tid, form
@@ -105,15 +108,17 @@ class WorldCupFetcher:
             home_ml = away_ml = draw_ml = None
             total_line = over_odds = under_odds = None
 
+            # ESPN returns explicit null (not a missing key) for moneyline/total/sub-fields
+            # on unpriced future games, so guard every level with (x or {}).
             for o in comp.get("odds", []):
-                ml = o.get("moneyline", {})
-                home_ml = self._parse_ml(ml.get("home", {}).get("close", {}).get("odds"))
-                away_ml = self._parse_ml(ml.get("away", {}).get("close", {}).get("odds"))
-                draw_ml = self._parse_ml(ml.get("draw", {}).get("close", {}).get("odds"))
+                ml = o.get("moneyline") or {}
+                home_ml = self._parse_ml(((ml.get("home") or {}).get("close") or {}).get("odds"))
+                away_ml = self._parse_ml(((ml.get("away") or {}).get("close") or {}).get("odds"))
+                draw_ml = self._parse_ml(((ml.get("draw") or {}).get("close") or {}).get("odds"))
 
-                tot = o.get("total", {})
-                over_close  = tot.get("over",  {}).get("close", {})
-                under_close = tot.get("under", {}).get("close", {})
+                tot = o.get("total") or {}
+                over_close  = (tot.get("over")  or {}).get("close") or {}
+                under_close = (tot.get("under") or {}).get("close") or {}
                 if over_close.get("line"):
                     try:
                         total_line = float(
@@ -137,9 +142,9 @@ class WorldCupFetcher:
             away_implied = raw_away / total_raw if total_raw else 0.5
             draw_implied = raw_draw / total_raw if total_raw else 0.0
 
-            venue = comp.get("venue", {})
+            venue = comp.get("venue") or {}
             venue_str = ", ".join(
-                filter(None, [venue.get("fullName"), venue.get("address", {}).get("city")])
+                filter(None, [venue.get("fullName"), (venue.get("address") or {}).get("city")])
             )
 
             return {
