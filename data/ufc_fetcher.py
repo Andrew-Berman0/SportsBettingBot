@@ -43,6 +43,7 @@ class UFCFetcher:
         self.odds_api_key = odds_api_key
         self._athlete_ref: dict[str, str] = {}        # athlete_id -> $ref
         self._stats_cache: dict[str, tuple[float, dict]] = {}  # athlete_id -> (ts, stats)
+        self._parse_errors = 0   # fights that crashed in _build_fight this fetch (drift signal)
 
     # ------------------------------------------------------------------
     # Upcoming fights (pre-parsed game dicts, compatible with the bot pipeline)
@@ -79,14 +80,22 @@ class UFCFetcher:
         odds_map = self._fetch_ufc_odds()
         fights: list[dict] = []
         seen: set[str] = set()
+        self._parse_errors = 0
         for ev in soon:
             for comp in ev["competitions"]:
-                fight = self._build_fight(ev, comp, odds_map)
+                try:
+                    fight = self._build_fight(ev, comp, odds_map)
+                except Exception as e:
+                    self._parse_errors += 1
+                    logger.warning(f"UFC build fight error: {e}")
+                    continue
                 if fight and fight["game_id"] not in seen:
                     seen.add(fight["game_id"])
                     fights.append(fight)
 
         logger.info(f"UFC: {len(fights)} fight(s) with odds on {soon[0]['name']}")
+        from SportsBettingBot.notifications import push_notifier
+        push_notifier.notify_parse_errors("UFC", self._parse_errors)
         with open(cache_file, "w") as f:
             json.dump(fights, f)
         return fights

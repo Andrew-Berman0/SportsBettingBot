@@ -8,12 +8,15 @@ Fails silently — a broken push should never crash the bot.
 
 import logging
 import os
+from datetime import datetime, timezone
+from pathlib import Path
 
 import requests
 
 logger = logging.getLogger(__name__)
 
 _API_URL = "https://onesignal.com/api/v1/notifications"
+_PARSE_ALERT_DIR = Path(__file__).resolve().parent.parent / "data" / "raw"
 
 
 def _headers() -> dict | None:
@@ -80,6 +83,33 @@ def _send(title: str, body: str, admin_only: bool = False) -> None:
 def notify_admin(title: str, body: str) -> None:
     """Admin-only push (same player id as the data-gap alerts)."""
     _send(title=title, body=body, admin_only=True)
+
+
+def notify_parse_errors(source: str, n: int) -> None:
+    """Admin alert when a fetcher drops events at the PARSE stage (likely API drift) —
+    these never reach the data-gap detector, which runs after parsing. Deduped per
+    source per UTC day so a persistent issue can't spam."""
+    if n <= 0:
+        return
+    logger.warning(f"{source}: {n} event(s) failed to parse — possible API change")
+    key = "".join(c if c.isalnum() else "_" for c in source.lower())
+    sentinel = _PARSE_ALERT_DIR / f".parse_alert_{key}.day"
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    try:
+        if sentinel.read_text().strip() == today:
+            return
+    except Exception:
+        pass
+    try:
+        _PARSE_ALERT_DIR.mkdir(parents=True, exist_ok=True)
+        notify_admin(
+            f"⚠ {source} parse failures",
+            f"{n} {source} event(s) failed to parse and were dropped from evaluation — "
+            f"likely an API shape change. Check the fetcher's parser.",
+        )
+        sentinel.write_text(today)
+    except Exception as e:
+        logger.warning(f"Parse-error alert failed ({source}): {e}")
 
 
 def notify_data_missing(matchup: str, sport_label: str, missing: list[str]) -> None:

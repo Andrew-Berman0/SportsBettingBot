@@ -38,6 +38,7 @@ class OddsFetcher:
         self.api_key = api_key
         self.session = requests.Session()
         self._auth_params = {"key": self.api_key}
+        self._parse_errors = 0   # events that crashed in _parse_event this fetch (drift signal)
 
     def get_upcoming_games(self, sport: str, bookmakers: list[str]) -> list[dict]:
         """
@@ -100,6 +101,7 @@ class OddsFetcher:
             return []
 
         parsed, seen = [], set()
+        self._parse_errors = 0
         for event in raw_events:
             game = self._parse_event(event, sport)
             if game and game["game_id"] not in seen:
@@ -107,6 +109,8 @@ class OddsFetcher:
                 parsed.append(game)
 
         logger.info(f"Fetched {len(parsed)} games for {sport}")
+        from SportsBettingBot.notifications import push_notifier
+        push_notifier.notify_parse_errors(sport.split("_")[-1].upper(), self._parse_errors)
         with open(cache_file, "w") as f:
             json.dump(parsed, f)
         return parsed
@@ -176,6 +180,7 @@ class OddsFetcher:
                 "away_implied":  OddsFetcher.american_to_implied(away_ml),
             }
         except Exception as e:
+            self._parse_errors += 1
             logger.warning(f"Failed to parse Rundown event: {e}")
             return None
 
