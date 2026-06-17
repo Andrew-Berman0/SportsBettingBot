@@ -12,6 +12,7 @@ admin alert (same channel as the data-gap alerts). Re-arms silently when the
 sport settles back down, so it alerts on the transition, not every day.
 """
 import json
+import argparse
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -28,15 +29,41 @@ from SportsBettingBot.notifications import push_notifier
 
 WINDOW    = 15     # each sport's most recent N evaluated games
 MIN_GAMES = 10     # need at least this many to judge
-# Alert only on an EGREGIOUS spike — above where healthy sports currently sit
-# (NBA/WNBA ~20%, MLB ~13%). Divergence alone can't tell good divergence (NBA's
-# winning playoff calls) from bad (MLB's losing ERA bets), so this is a coarse
-# "go look" trigger, not a verdict. Tune as more data accrues.
-THRESHOLD = 0.30
-STATE     = REPO / "data" / "raw" / ".divergence_watch_state.json"
+# Two failure modes, two triggers:
+#  - TAIL: an EGREGIOUS spike of big single-game divergences (the MLB ERA-bet kind).
+#    Coarse "go look" trigger above where healthy sports sit (NBA/WNBA ~20%, MLB ~13%).
+#  - BIAS: a SYSTEMATIC directional drift — Claude consistently rating home above/below
+#    the market (the WNBA home-fade kind). The tail check misses this because it's not
+#    about outliers; it's the center of the distribution shifting.
+THRESHOLD      = 0.30   # tail: >=30% of recent games diverged >10pt from market
+BIAS_THRESHOLD = 0.06   # bias: avg Claude-home off the market by >=6pt
+STATE          = REPO / "data" / "raw" / ".divergence_watch_state.json"
+
+
+def _check(state: dict, key: str, bad: bool, title: str, body: str, dry: bool) -> bool:
+    """Alert once on entering a bad state; re-arm silently on recovery. Returns changed."""
+    alerted = state.get(key, False)
+    if bad and not alerted:
+        if dry:
+            print(f"WOULD ALERT {key}: {title}")
+            return False
+        push_notifier.notify_admin(title, body)
+        state[key] = True
+        print(f"ALERT {key}")
+        return True
+    if not bad and alerted:
+        if not dry:
+            state[key] = False
+        print(f"recovered {key}")
+        return not dry
+    print(f"{key}: {'alerted' if alerted else 'ok'}{' [dry]' if dry else ''}")
+    return False
 
 
 def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--dry-run", action="store_true", help="print what would alert, send nothing")
+    dry = ap.parse_args().dry_run
     outcomes = REPO / "game_outcomes.jsonl"
     if not outcomes.exists():
         print("no outcomes file"); return
@@ -67,25 +94,30 @@ def main() -> None:
             print(f"{sport}: {len(rs)} recent games (<{MIN_GAMES}) — skip")
             continue
         s = _stats(rs)
+        SH = sport.split("_")[-1].upper()
         rate = s["big_divergence"] / s["n"]
-        alerted = state.get(sport, False)
+        bias = s["avg_claude_home"] - s["avg_market_home"]
 
-        if rate >= THRESHOLD and not alerted:
-            push_notifier.notify_admin(
-                f"⚠ {sport.split('_')[-1].upper()} divergence spike",
-                f"{s['big_divergence']}/{s['n']} of recent games diverged >10pt from the "
-                f"market (avg {s['avg_divergence']:.0%}) — possible overconfidence vs an "
-                f"efficient market. Review: python3 scripts/analyst_calibration.py --sport {sport}",
-            )
-            state[sport] = True; changed = True
-            print(f"ALERT {sport}: {rate:.0%} >10pt over last {s['n']}")
-        elif rate < THRESHOLD and alerted:
-            state[sport] = False; changed = True   # recovered — re-arm silently
-            print(f"recovered {sport}: {rate:.0%}")
-        else:
-            print(f"{sport}: {rate:.0%} >10pt ({'alerted' if alerted else 'ok'})")
+        changed |= _check(
+            state, f"{sport}:tail", rate >= THRESHOLD,
+            f"⚠ {SH} divergence spike",
+            f"{s['big_divergence']}/{s['n']} of recent games diverged >10pt from the market "
+            f"(avg {s['avg_divergence']:.0%}) — possible overconfidence. "
+            f"Review: python3 scripts/analyst_calibration.py --sport {sport}",
+            dry,
+        )
+        side = "home" if bias < 0 else "away"
+        changed |= _check(
+            state, f"{sport}:bias", abs(bias) >= BIAS_THRESHOLD,
+            f"⚠ {SH} systematic {side} lean",
+            f"Claude rates home {s['avg_claude_home']:.0%} vs market {s['avg_market_home']:.0%} "
+            f"({bias * 100:+.0f}pt) over last {s['n']} — persistent {side} bias vs the market "
+            f"(actual home win {s['home_win_rate']:.0%}). "
+            f"Review: python3 scripts/analyst_calibration.py --sport {sport}",
+            dry,
+        )
 
-    if changed:
+    if changed and not dry:
         STATE.write_text(json.dumps(state))
 
 

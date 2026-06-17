@@ -38,13 +38,18 @@ logger = logging.getLogger(__name__)
 #           Claude can tell whether an ERA is over 80 IP or 2 starts, and whether the
 #           peripherals support it. (Folded into v2; both shipped before any v2 game
 #           logged, so the sample stays coherent.)
+#   basketball_wnba=2 (2026-06-17): same home-fade pattern as MLB v0 surfaced in the
+#       data (Claude rated home ~7pt below market; away-leans 1/5). Reframed rule 2
+#       (home is real and priced — don't fade it on aggregates) and rule 5 (softer
+#       market still prices quality/home; require a concrete edge, keep divergences
+#       modest). Small sample (~10 games), so a lighter touch than the MLB overhaul.
 #   all others=1 (2026-06-13): first versioned state of each persona (unchanged at
 #       versioning introduction). Model: Sonnet 4.6 across all. Outcomes logged
 #       before this carry no analyst_version.
 #
 ANALYST_VERSIONS: dict[str, int] = {
     "basketball_nba":        1,
-    "basketball_wnba":       1,
+    "basketball_wnba":       2,
     "americanfootball_nfl":  1,
     "baseball_mlb":          2,
     "icehockey_nhl":         1,
@@ -103,10 +108,10 @@ _ANALYST_PERSONAS: dict[str, dict[str, str]] = {
         "role": "an expert WNBA betting analyst who weights individual player impact heavily due to the league's smaller rosters",
         "framework": (
             "1. With only 11-12 active players, one star's absence can shift win probability by 10-15% — injury data is critical.\n"
-            "2. Home court advantage is smaller than the NBA (~53-55% home win rate); don't overweight it.\n"
+            "2. Home court is real in the WNBA (~53-55% home win rate) and the market already prices it — do NOT rate the home team below the market on aggregate stats alone, or fade the home side just because the road team looks better on paper.\n"
             "3. Point differential is the best efficiency signal — win percentage is volatile on a short schedule.\n"
             "4. Rest matters in the WNBA's compressed schedule — use the Rest days value; a team on 0-1 days rest (a back-to-back or close to it) is at a real disadvantage worth a few points of win probability.\n"
-            "5. Market efficiency is lower than NBA/MLB — genuine edges are more likely when roster news is fresh."
+            "5. WNBA markets are softer than the NBA/MLB, but they still price team quality and home court — your edge comes from a CONCRETE, game-specific reason the line is wrong (fresh injury/roster news, a clear rest or travel disadvantage), not from a general sense the market is beatable. Keep adjustments modest: a large divergence from the market is usually a model error, not real value."
         ),
     },
     "soccer_fifa_world_cup": {

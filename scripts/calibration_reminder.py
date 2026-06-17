@@ -24,10 +24,11 @@ from analyst_calibration import _stats
 from SportsBettingBot.notifications import push_notifier
 from SportsBettingBot.models.claude_analyst import analyst_version_for
 
-THRESHOLD = 30
-SPORT     = "baseball_mlb"
-VERSION   = analyst_version_for(SPORT)   # track the CURRENT version, not a hardcoded one
-SENTINEL  = REPO / "data" / "raw" / f".calib_reminder_mlb_v{VERSION}.sent"
+THRESHOLD    = 30
+# Sports whose analyst was recently changed and we want a 30-game checkpoint on.
+# Each is watched at its CURRENT version with its own per-version sentinel, so the
+# ping follows the latest logic and fires once.
+WATCH_SPORTS = ["baseball_mlb", "basketball_wnba"]
 
 
 def main() -> None:
@@ -44,27 +45,30 @@ def main() -> None:
             except json.JSONDecodeError:
                 pass
 
-    cur = [r for r in recs if r.get("sport") == SPORT and r.get("analyst_version") == VERSION]
-    n = len(cur)
-    if n < THRESHOLD:
-        print(f"v{VERSION} {SPORT} games: {n}/{THRESHOLD} — waiting")
-        return
-    if SENTINEL.exists():
-        print("reminder already sent")
-        return
+    for sport in WATCH_SPORTS:
+        version  = analyst_version_for(sport)
+        sentinel = REPO / "data" / "raw" / f".calib_reminder_{sport}_v{version}.sent"
+        cur = [r for r in recs if r.get("sport") == sport and r.get("analyst_version") == version]
+        n = len(cur)
+        if n < THRESHOLD:
+            print(f"{sport} v{version}: {n}/{THRESHOLD} — waiting")
+            continue
+        if sentinel.exists():
+            print(f"{sport} v{version}: reminder already sent")
+            continue
 
-    s = _stats(cur)
-    rec = f"{s.get('bet_wins', 0)}-{s.get('bet_losses', 0)}" if s.get("n_bets") else "no bets yet"
-    body = (
-        f"v{VERSION} MLB hit {n} games. Divergence avg |Claude-market| {s['avg_divergence']:.0%}, "
-        f"{s['big_divergence']} bets >10pt (v2 should shrink these). Home prob: Claude "
-        f"{s['avg_claude_home']:.0%} vs market {s['avg_market_home']:.0%} vs actual "
-        f"{s['home_win_rate']:.0%}. Bets {rec}. Run: "
-        f"python3 scripts/analyst_calibration.py --sport baseball_mlb"
-    )
-    push_notifier.notify_admin(f"MLB calibration ready (v{VERSION})", body)
-    SENTINEL.write_text("sent\n")
-    print(f"reminder sent (n={n})")
+        s = _stats(cur)
+        SH = sport.split("_")[-1].upper()
+        rec = f"{s.get('bet_wins', 0)}-{s.get('bet_losses', 0)}" if s.get("n_bets") else "no bets yet"
+        body = (
+            f"v{version} {SH} hit {n} games. Home prob Claude {s['avg_claude_home']:.0%} vs "
+            f"market {s['avg_market_home']:.0%} vs actual {s['home_win_rate']:.0%}. "
+            f"Divergence avg {s['avg_divergence']:.0%}, {s['big_divergence']} >10pt. Bets {rec}. "
+            f"Run: python3 scripts/analyst_calibration.py --sport {sport}"
+        )
+        push_notifier.notify_admin(f"{SH} calibration ready (v{version})", body)
+        sentinel.write_text("sent\n")
+        print(f"{sport} v{version}: reminder sent (n={n})")
 
 
 if __name__ == "__main__":
