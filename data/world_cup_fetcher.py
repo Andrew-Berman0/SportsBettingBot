@@ -129,7 +129,8 @@ class WorldCupFetcher:
                         pass
                     over_odds  = self._parse_ml(over_close.get("odds"))
                     under_odds = self._parse_ml(under_close.get("odds"))
-                break  # first odds block is sufficient
+                if home_ml is not None and away_ml is not None:
+                    break  # use the first odds block that actually has a moneyline
 
             if home_ml is None or away_ml is None:
                 return None
