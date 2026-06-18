@@ -49,7 +49,12 @@ class WorldCupFetcher:
             if age_min < 90:
                 logger.info(f"World Cup odds cache fresh ({age_min:.0f}min) — skipping fetch")
                 with open(cache_file) as f:
-                    return json.load(f)
+                    games = json.load(f)
+                # The file cache survives restarts but the in-memory team-id cache does
+                # not — repopulate it from the cached games so roster/injury lookups
+                # (and thus the squad data-gap check) don't fail after a restart.
+                self._cache_team_ids(games)
+                return games
 
         games: list[dict] = []
         seen: set[str] = set()
@@ -77,6 +82,15 @@ class WorldCupFetcher:
         with open(cache_file, "w") as f:
             json.dump(games, f)
         return games
+
+    def _cache_team_ids(self, games: list[dict]) -> None:
+        """Populate the name→team-id cache from game dicts (which carry the ids),
+        so roster/injury lookups work even when games came from the file cache."""
+        for g in games:
+            for side in ("home", "away"):
+                name, tid = g.get(f"{side}_team"), g.get(f"{side}_team_id")
+                if name and tid:
+                    self._team_id_cache[name.lower()] = tid
 
     def _parse_event(self, event: dict) -> dict | None:
         try:
