@@ -46,6 +46,14 @@ logger = logging.getLogger(__name__)
 #       applies a higher bar to AWAY leans: favor the road side only on an unambiguous,
 #       game-specific edge (ace vs call-up, confirmed home-side absence), never on
 #       aggregates / form / "live dog" feel. Home logic unchanged (it's working).
+#   basketball_wnba=3 (2026-06-19): player-level data. The persona was built around
+#       "individual player impact" (rule 1) but was only fed team aggregates + injury
+#       NAMES — no per-player production, so it couldn't gauge how much an absence
+#       mattered and fell back on stale name-recognition. Added a per-player fetcher
+#       (WNBAStatsFetcher.get_player_stats → top scorers' PPG/RPG/APG/min from ESPN
+#       core) surfaced as "Key players (season avg)" in the prompt; rule 1 now tells
+#       Claude to gauge injuries by actual production/minutes. key_players is a critical
+#       data-gap field (alerts if it comes back empty).
 #   basketball_wnba=2 (2026-06-17): same home-fade pattern as MLB v0 surfaced in the
 #       data (Claude rated home ~7pt below market; away-leans 1/5). Reframed rule 2
 #       (home is real and priced — don't fade it on aggregates) and rule 5 (softer
@@ -66,7 +74,7 @@ logger = logging.getLogger(__name__)
 #
 ANALYST_VERSIONS: dict[str, int] = {
     "basketball_nba":        1,
-    "basketball_wnba":       2,
+    "basketball_wnba":       3,
     "americanfootball_nfl":  1,
     "baseball_mlb":          3,
     "icehockey_nhl":         1,
@@ -125,7 +133,7 @@ _ANALYST_PERSONAS: dict[str, dict[str, str]] = {
     "basketball_wnba": {
         "role": "an expert WNBA betting analyst who weights individual player impact heavily due to the league's smaller rosters",
         "framework": (
-            "1. With only 11-12 active players, one star's absence can shift win probability by 10-15% — injury data is critical.\n"
+            "1. With only 11-12 active players, one star's absence can shift win probability by 10-15%. You are given each team's KEY PLAYERS with season per-game production (PPG/RPG/APG/minutes) — cross-reference the injury list against it: an injured 18-PPG, 32-min starter is a major blow, a missing deep-bench player is nearly irrelevant. Gauge an absence by the player's actual production and role (minutes), NOT by name recognition or memory. Two healthy rosters of comparable top-end production is not an edge — it's already in the line.\n"
             "2. Home court is real in the WNBA (~53-55% home win rate) and the market already prices it — do NOT rate the home team below the market on aggregate stats alone, or fade the home side just because the road team looks better on paper.\n"
             "3. Point differential is the best efficiency signal — win percentage is volatile on a short schedule.\n"
             "4. Rest matters in the WNBA's compressed schedule — use the Rest days value; a team on 0-1 days rest (a back-to-back or close to it) is at a real disadvantage worth a few points of win probability.\n"
@@ -393,6 +401,12 @@ class ClaudeAnalyst:
                     streak_str = f"W{sv}" if sv >= 0 else f"L{abs(sv)}"
                 except (TypeError, ValueError):
                     streak_str = "N/A"
+                kp = stats.get("key_players") or []
+                players_str = " | ".join(
+                    f"{p.get('name')} ({p.get('pos','')}) "
+                    f"{p.get('ppg','?')}p/{p.get('rpg','?')}r/{p.get('apg','?')}a, {p.get('mpg','?')}min"
+                    for p in kp
+                ) or "N/A"
                 return "\n".join([
                     f"- Win %: {_stat(stats, 'winPercent', fmt=lambda v: f'{v:.1%}')}",
                     f"- Points/game (for): {_stat(stats, 'avgPointsFor', 'pointsFor', fmt=lambda v: f'{v:.1f}')}",
@@ -404,6 +418,7 @@ class ClaudeAnalyst:
                     f"- Ball control: A/TO ratio {_stat(stats, 'ast_to_ratio', fmt=_dec2)} | Turnovers/game {_stat(stats, 'avg_turnovers', fmt=_dec2)}",
                     f"- Rebounds/game: {_stat(stats, 'avg_rebounds', fmt=_dec2)} (off: {_stat(stats, 'avg_off_rebounds', fmt=_dec2)})",
                     f"- Defense: Steals/game {_stat(stats, 'avg_steals', fmt=_dec2)} | Blocks/game {_stat(stats, 'avg_blocks', fmt=_dec2)}",
+                    f"- Key players (season avg): {players_str}",
                     f"- Rest days: {stats.get('rest_days', 'N/A')}",
                     f"- Streak: {streak_str}",
                 ])

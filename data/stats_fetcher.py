@@ -617,6 +617,8 @@ class WNBAStatsFetcher:
     _CACHE_TTL_HOURS = 6
 
     _SCHEDULE_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/teams/{tid}/schedule"
+    _ROSTER_URL   = "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/teams/{tid}/roster"
+    _CORE_BASE    = "https://sports.core.api.espn.com/v2/sports/basketball/leagues/wnba"
 
     def __init__(self):
         self.session = requests.Session()
@@ -729,6 +731,72 @@ class WNBAStatsFetcher:
                 "avg_blocks":       flat.get("avgBlocks"),
             }
         except Exception:
+            return {}
+
+    def get_player_stats(self, team_name: str, top_n: int = 6) -> list[dict]:
+        """Top season scorers for a team: [{name, pos, ppg, rpg, apg, mpg}], sorted by PPG.
+        The WNBA persona weights individual players heavily (one star's absence can swing a
+        game), but it was only given team aggregates + injury NAMES — no way to gauge how
+        good an injured player is. This supplies per-player production so the persona is
+        actionable. Cached on disk per team for 6h (season averages move slowly)."""
+        tid = self._resolve_team_id(team_name)
+        if not tid:
+            return []
+        cache_file = CACHE_DIR / f"wnba_players_{tid}.json"
+        if cache_file.exists():
+            age_hours = (time.time() - cache_file.stat().st_mtime) / 3600
+            if age_hours < self._CACHE_TTL_HOURS:
+                try:
+                    with open(cache_file) as f:
+                        return json.load(f)
+                except Exception:
+                    pass
+        players: list[dict] = []
+        try:
+            r = self.session.get(self._ROSTER_URL.format(tid=tid), timeout=10)
+            r.raise_for_status()
+            for a in r.json().get("athletes", []):
+                if not isinstance(a, dict):
+                    continue
+                aid, name = a.get("id"), a.get("displayName")
+                if not aid or not name:
+                    continue
+                rates = self._fetch_player_rates(aid)
+                if rates.get("ppg") is None:
+                    continue
+                players.append({"name": name, "pos": (a.get("position") or {}).get("abbreviation", ""), **rates})
+            players.sort(key=lambda p: p.get("ppg") or 0, reverse=True)
+            players = players[:top_n]
+            with open(cache_file, "w") as f:
+                json.dump(players, f)
+        except Exception as e:
+            logger.warning(f"WNBA player stats error for {team_name}: {e}")
+        return players
+
+    def _fetch_player_rates(self, athlete_id) -> dict:
+        """Season per-game averages (PPG/RPG/APG/MPG) for a WNBA athlete id, from ESPN core."""
+        year = datetime.today().year
+        try:
+            r = self.session.get(
+                f"{self._CORE_BASE}/seasons/{year}/types/2/athletes/{athlete_id}/statistics",
+                timeout=10,
+            )
+            r.raise_for_status()
+            flat: dict = {}
+            for cat in r.json().get("splits", {}).get("categories", []):
+                for x in cat.get("stats", []):
+                    flat[x.get("name")] = x.get("value")
+            if flat.get("avgPoints") is None:
+                return {}
+            rnd = lambda v: round(v, 1) if isinstance(v, (int, float)) else None
+            return {
+                "ppg": rnd(flat.get("avgPoints")),
+                "rpg": rnd(flat.get("avgRebounds")),
+                "apg": rnd(flat.get("avgAssists")),
+                "mpg": rnd(flat.get("avgMinutes")),
+            }
+        except Exception as e:
+            logger.debug(f"WNBA player rates error ({athlete_id}): {e}")
             return {}
 
 

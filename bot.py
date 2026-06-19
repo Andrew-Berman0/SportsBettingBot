@@ -218,6 +218,7 @@ _CRITICAL_STAT_FIELDS: dict[str, dict[str, str]] = {
         "fg_pct":         "FG%",
         "ast_to_ratio":   "A/TO ratio",
         "Last Ten Games": "last-10 record",
+        "key_players":    "key player stats",
         "rest_days":      "rest days",
         "streak":         "streak",
     },
@@ -249,6 +250,8 @@ def _is_missing(v) -> bool:
     if isinstance(v, float) and math.isnan(v):
         return True
     if isinstance(v, str) and v.strip().upper() in ("", "N/A", "NA", "NONE", "TBD", "?"):
+        return True
+    if isinstance(v, (list, dict, tuple)) and len(v) == 0:   # e.g. key_players came back empty
         return True
     return False
 
@@ -373,6 +376,7 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
             rd = wnba_fetcher.get_rest_days(team_name, commence)
             if rd is not None:
                 stats["rest_days"] = rd
+            stats["key_players"] = wnba_fetcher.get_player_stats(team_name)
 
     if sport == "soccer_fifa_world_cup" and world_cup_fetcher:
         home_injuries, home_roster = world_cup_fetcher.get_team_roster_and_injuries(home_team)
