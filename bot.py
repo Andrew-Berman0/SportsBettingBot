@@ -194,12 +194,17 @@ def get_team_stats(sport: str, team_name: str, nba_fetcher: NBAStatsFetcher,
 # Per-sport stats that should be populated if their data stream succeeded.
 # A None/NaN/placeholder here means a fetch or merge silently failed — Claude
 # would otherwise analyze with a hole in exactly the inputs its persona weights.
+# Basketball per-player fetchers return up to 6 top scorers; a healthy fetch yields
+# the core rotation. Alert if a partial fetch drops below this, so a degraded result
+# (not just a fully-empty one) still surfaces — a missing star skews the analysis.
+_MIN_KEY_PLAYERS = 4
+
 _CRITICAL_STAT_FIELDS: dict[str, dict[str, str]] = {
     "basketball_nba": {
         "NET_RATING":   "net rating",
         "win_pct_l10":  "last-10 form",
         "avg_diff_l10": "last-10 point diff",
-        "key_players":  "key player stats",
+        # key_players handled separately (count threshold, not empty/non-empty) below
     },
     "baseball_mlb": {
         "team_era":    "team ERA",
@@ -219,7 +224,7 @@ _CRITICAL_STAT_FIELDS: dict[str, dict[str, str]] = {
         "fg_pct":         "FG%",
         "ast_to_ratio":   "A/TO ratio",
         "Last Ten Games": "last-10 record",
-        "key_players":    "key player stats",
+        # key_players handled separately (count threshold, not empty/non-empty) below
         "rest_days":      "rest days",
         "streak":         "streak",
     },
@@ -273,6 +278,14 @@ def _detect_missing_data(sport: str, home_team: str, away_team: str,
         absent = [label for key, label in field_map.items() if _is_missing(stats.get(key))]
         if absent:
             missing.append(f"{team}: {', '.join(absent)}")
+
+    if sport in ("basketball_nba", "basketball_wnba"):
+        for team, stats in ((home_team, home_stats), (away_team, away_stats)):
+            if not stats:
+                continue   # already reported as "all team stats" above
+            n = len(stats.get("key_players") or [])
+            if n < _MIN_KEY_PLAYERS:
+                missing.append(f"{team}: key players ({n}/{_MIN_KEY_PLAYERS} fetched)")
 
     if sport == "soccer_fifa_world_cup":
         if not home_roster:
