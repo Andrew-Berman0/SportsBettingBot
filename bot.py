@@ -199,6 +199,7 @@ _CRITICAL_STAT_FIELDS: dict[str, dict[str, str]] = {
         "NET_RATING":   "net rating",
         "win_pct_l10":  "last-10 form",
         "avg_diff_l10": "last-10 point diff",
+        "key_players":  "key player stats",
     },
     "baseball_mlb": {
         "team_era":    "team ERA",
@@ -370,6 +371,10 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
             if weather:
                 label = "dome" if weather.get("is_dome") else f"{weather.get('temp')}°F, {weather.get('wind_speed')} mph wind"
                 logger.info(f"  Weather: {label}")
+
+    if sport == "basketball_nba":
+        for team_name, stats in ((home_team, home_stats), (away_team, away_stats)):
+            stats["key_players"] = nba_fetcher.get_player_stats(team_name)
 
     if sport == "basketball_wnba" and wnba_fetcher is not None:
         for team_name, stats in ((home_team, home_stats), (away_team, away_stats)):

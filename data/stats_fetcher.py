@@ -45,9 +45,22 @@ class NBAStatsFetcher:
     Fetches NBA team stats via nba_api.
     Covers: offensive/defensive rating, pace, net rating, recent form,
     back-to-back indicator, rest days, home/away splits.
+
+    Per-player season averages come from ESPN (not nba_api) — the same basketball
+    endpoints the WNBA fetcher uses — so the feature works even where stats.nba.com
+    blocks the host.
     """
 
+    # ESPN per-player stats (independent of nba_api / stats.nba.com)
+    _ESPN_TEAMS_URL  = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams"
+    _ESPN_ROSTER_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/{tid}/roster"
+    _ESPN_CORE_BASE  = "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba"
+    _PLAYER_CACHE_TTL_HOURS = 6
+
     def __init__(self):
+        self.session = requests.Session()
+        self.session.headers.update({"User-Agent": "Mozilla/5.0"})
+        self._espn_team_id_map: dict[str, str] = {}  # displayName.lower() -> ESPN team_id
         try:
             from nba_api.stats.endpoints import leaguedashteamstats, teamgamelogs
             from nba_api.stats.static import teams
@@ -164,6 +177,92 @@ class NBAStatsFetcher:
             return None
         except Exception:
             return None
+
+    # ------------------------------------------------------------------
+    # Per-player season averages (ESPN) — lets the persona gauge how much an
+    # injured/key player matters, including rookies/call-ups missing from
+    # Claude's training memory. Mirrors WNBAStatsFetcher.get_player_stats.
+    # ------------------------------------------------------------------
+
+    def get_player_stats(self, team_name: str, top_n: int = 6) -> list[dict]:
+        """Top season scorers for a team: [{name, pos, ppg, rpg, apg, mpg}], sorted by PPG.
+        Cached on disk per team for 6h (season averages move slowly)."""
+        tid = self._resolve_espn_team_id(team_name)
+        if not tid:
+            return []
+        cache_file = CACHE_DIR / f"nba_players_{tid}.json"
+        if cache_file.exists():
+            age_hours = (time.time() - cache_file.stat().st_mtime) / 3600
+            if age_hours < self._PLAYER_CACHE_TTL_HOURS:
+                try:
+                    with open(cache_file) as f:
+                        return json.load(f)
+                except Exception:
+                    pass
+        players: list[dict] = []
+        try:
+            r = self.session.get(self._ESPN_ROSTER_URL.format(tid=tid), timeout=10)
+            r.raise_for_status()
+            for a in r.json().get("athletes", []):
+                if not isinstance(a, dict):
+                    continue
+                aid, name = a.get("id"), a.get("displayName")
+                if not aid or not name:
+                    continue
+                rates = self._fetch_player_rates(aid)
+                if rates.get("ppg") is None:
+                    continue
+                players.append({"name": name, "pos": (a.get("position") or {}).get("abbreviation", ""), **rates})
+            players.sort(key=lambda p: p.get("ppg") or 0, reverse=True)
+            players = players[:top_n]
+            with open(cache_file, "w") as f:
+                json.dump(players, f)
+        except Exception as e:
+            logger.warning(f"NBA player stats error for {team_name}: {e}")
+        return players
+
+    def _resolve_espn_team_id(self, team_name: str) -> str | None:
+        if not self._espn_team_id_map:
+            try:
+                data = self.session.get(self._ESPN_TEAMS_URL, timeout=10).json()
+                for t in (data.get("sports", [{}])[0].get("leagues", [{}])[0].get("teams", [])):
+                    team = t.get("team", {})
+                    if team.get("id") and team.get("displayName"):
+                        self._espn_team_id_map[team["displayName"].lower()] = team["id"]
+            except Exception as e:
+                logger.warning(f"NBA ESPN team list fetch failed: {e}")
+                self._espn_team_id_map = {}
+        name = team_name.lower()
+        if name in self._espn_team_id_map:
+            return self._espn_team_id_map[name]
+        nick = team_name.split()[-1].lower()
+        return next((tid for n, tid in self._espn_team_id_map.items() if n.split()[-1] == nick), None)
+
+    def _fetch_player_rates(self, athlete_id) -> dict:
+        """Season per-game averages (PPG/RPG/APG/MPG) for an NBA athlete id, from ESPN core."""
+        year = datetime.today().year
+        try:
+            r = self.session.get(
+                f"{self._ESPN_CORE_BASE}/seasons/{year}/types/2/athletes/{athlete_id}/statistics",
+                timeout=10,
+            )
+            r.raise_for_status()
+            flat: dict = {}
+            for cat in r.json().get("splits", {}).get("categories", []):
+                for x in cat.get("stats", []):
+                    flat[x.get("name")] = x.get("value")
+            if flat.get("avgPoints") is None:
+                return {}
+            rnd = lambda v: round(v, 1) if isinstance(v, (int, float)) else None
+            return {
+                "ppg": rnd(flat.get("avgPoints")),
+                "rpg": rnd(flat.get("avgRebounds")),
+                "apg": rnd(flat.get("avgAssists")),
+                "mpg": rnd(flat.get("avgMinutes")),
+            }
+        except Exception as e:
+            logger.debug(f"NBA player rates error ({athlete_id}): {e}")
+            return {}
 
 
 class ESPNStatsFetcher:

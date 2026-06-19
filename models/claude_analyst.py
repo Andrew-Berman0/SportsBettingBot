@@ -38,6 +38,14 @@ logger = logging.getLogger(__name__)
 #           Claude can tell whether an ERA is over 80 IP or 2 starts, and whether the
 #           peripherals support it. (Folded into v2; both shipped before any v2 game
 #           logged, so the sample stays coherent.)
+#   basketball_nba=2 (2026-06-19): player-level data. Like WNBA v3, the NBA persona
+#       leaned on "player availability is decisive" but was fed only team ratings +
+#       injury NAMES. The risk: a key ROOKIE/recent call-up is both missing from the
+#       data AND from Claude's training memory, so an injury to (or the presence of)
+#       that player can't be evaluated. Added NBAStatsFetcher.get_player_stats (top
+#       scorers' PPG/RPG/APG/min from ESPN core — independent of nba_api) surfaced as
+#       "Key players (season avg)"; rule 3 now gauges absences by production/minutes.
+#       key_players is a critical data-gap field.
 #   baseball_mlb=3 (2026-06-19): away-side skepticism. Rec-accuracy audit across all
 #       evaluated games showed a strong asymmetry — Claude's HOME leans hit 63% (MLB v2
 #       72%) but its AWAY leans hit only 46% overall (MLB post-legacy 3/18 ≈ 17%, worse
@@ -73,7 +81,7 @@ logger = logging.getLogger(__name__)
 #       before this carry no analyst_version.
 #
 ANALYST_VERSIONS: dict[str, int] = {
-    "basketball_nba":        1,
+    "basketball_nba":        2,
     "basketball_wnba":       3,
     "americanfootball_nfl":  1,
     "baseball_mlb":          3,
@@ -96,7 +104,7 @@ _ANALYST_PERSONAS: dict[str, dict[str, str]] = {
         "framework": (
             "1. NET RATING is your primary lens — offensive and defensive efficiency matter more than raw record.\n"
             "2. Weight the last 10 games heavily; momentum and form are real in the NBA. Last-10 and last-5 average point differential are sharper form signals than win rate alone — a team winning by shrinking margins is cooling off.\n"
-            "3. Player availability is decisive — NBA outcomes swing hard on who is in or out. A missing or sidelined star (check the injury list) can shift win probability 8-15%; weigh the Out/Doubtful/Questionable list heavily, and do not assume a player listed out will play.\n"
+            "3. Player availability is decisive — NBA outcomes swing hard on who is in or out. Cross-reference the injury list against the KEY PLAYERS line (each team's top players with season PPG/RPG/APG/minutes): an injured 25-PPG, 36-min starter can shift win probability 8-15%, while a missing end-of-bench player barely matters. Gauge an absence by that player's actual production and minutes — NOT by name recognition. This matters most for rookies and recent call-ups you may not otherwise know: trust the KEY PLAYERS stats over any memory. Do not assume a player listed out will play.\n"
             "4. Rest and back-to-backs are meaningful — a back-to-back team loses ~2-3% win probability.\n"
             "5. Home court is worth ~2-3% in the regular season (home teams win ~55-58%); in the playoffs, home court and series pressure dominate, and teams facing elimination often overperform.\n"
             "6. Caution: in playoffs, current form matters more than regular-season record."
@@ -298,6 +306,12 @@ class ClaudeAnalyst:
         def build_stats_block(stats: dict, side: str = "") -> str:
             if sport == "basketball_nba":
                 _sgn1 = lambda v: f"{v:+.1f}"
+                kp = stats.get("key_players") or []
+                players_str = " | ".join(
+                    f"{p.get('name')} ({p.get('pos','')}) "
+                    f"{p.get('ppg','?')}p/{p.get('rpg','?')}r/{p.get('apg','?')}a, {p.get('mpg','?')}min"
+                    for p in kp
+                ) or "N/A"
                 return "\n".join([
                     f"- Net Rating: {_stat(stats, 'NET_RATING')}",
                     f"- Off Rating: {_stat(stats, 'OFF_RATING')}",
@@ -307,6 +321,7 @@ class ClaudeAnalyst:
                     f"{_stat(stats, 'avg_diff_l10', fmt=_sgn1)} avg point diff",
                     f"- Last 5: {_pct(stats.get('win_pct_l5'))} win rate | "
                     f"{_stat(stats, 'avg_diff_l5', fmt=_sgn1)} avg point diff",
+                    f"- Key players (season avg): {players_str}",
                     f"- Back-to-back: {'Yes' if stats.get('is_back_to_back') else 'No'}",
                     f"- Rest days: {stats.get('rest_days', 'N/A')}",
                 ])
