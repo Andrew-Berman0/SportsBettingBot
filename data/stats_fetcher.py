@@ -7,6 +7,7 @@ NBA: uses the free nba_api package (official NBA stats endpoint)
 NFL/MLB/NHL: ESPN unofficial API (free, no key required)
 """
 
+import json
 import logging
 import time
 from datetime import date as date_type, datetime, timedelta
