@@ -38,6 +38,14 @@ logger = logging.getLogger(__name__)
 #           Claude can tell whether an ERA is over 80 IP or 2 starts, and whether the
 #           peripherals support it. (Folded into v2; both shipped before any v2 game
 #           logged, so the sample stays coherent.)
+#   baseball_mlb=3 (2026-06-19): away-side skepticism. Rec-accuracy audit across all
+#       evaluated games showed a strong asymmetry — Claude's HOME leans hit 63% (MLB v2
+#       72%) but its AWAY leans hit only 46% overall (MLB post-legacy 3/18 ≈ 17%, worse
+#       than a coin flip). The v2 home-fade fix worked, but Claude still over-rates the
+#       road team / underdog and invents away value that doesn't materialize. New rule 10
+#       applies a higher bar to AWAY leans: favor the road side only on an unambiguous,
+#       game-specific edge (ace vs call-up, confirmed home-side absence), never on
+#       aggregates / form / "live dog" feel. Home logic unchanged (it's working).
 #   basketball_wnba=2 (2026-06-17): same home-fade pattern as MLB v0 surfaced in the
 #       data (Claude rated home ~7pt below market; away-leans 1/5). Reframed rule 2
 #       (home is real and priced — don't fade it on aggregates) and rule 5 (softer
@@ -60,7 +68,7 @@ ANALYST_VERSIONS: dict[str, int] = {
     "basketball_nba":        1,
     "basketball_wnba":       2,
     "americanfootball_nfl":  1,
-    "baseball_mlb":          2,
+    "baseball_mlb":          3,
     "icehockey_nhl":         1,
     "soccer_fifa_world_cup": 1,
     "mma_ufc":               2,
@@ -100,7 +108,8 @@ _ANALYST_PERSONAS: dict[str, dict[str, str]] = {
             "6. To take a side you need a CONCRETE, game-specific reason the market line is wrong: a clear starting-pitcher mismatch (over a believable sample, not 1-2 starts), a confirmed key injury or lineup absence, or a distinct bullpen edge in a likely-close game. Without a specific reason like that, defer to the market and pass.\n"
             "7. MAGNITUDE DISCIPLINE — this is critical. MLB single-game win probabilities are compressed: even the best team vs the worst rarely prices beyond ~65/35, and an ERA edge between two real MLB starters is worth only a few points. Even a clear starter AND bullpen edge rarely justifies moving the game's win probability more than ~8-10 points away from the market's implied number. If your estimate diverges from the market by more than ~10 points, that is a red flag that you are overweighting ERA — pull back toward the market unless there is a roster-level mismatch (a genuine ace facing a replacement-level call-up). The market already prices the starters and bullpens; your edge is at the margin, not a wholesale repricing.\n"
             "8. Judge the starter's ERA by its sample and peripherals (both are now provided). Use IP/GS for sample size — an ERA over 80+ IP is meaningful, but a shiny or ugly ERA under ~20 IP (1-3 starts) is mostly noise. Cross-check ERA against WHIP, K/9, and K/BB: if the ERA is far better than the peripherals suggest, it is likely lucky and will regress — trust the peripherals over a small-sample ERA when they conflict.\n"
-            "9. Default to 'pass' when the edge is below 5%, when factors conflict, or when your lean rests mainly on season team-quality aggregates rather than a specific game-level edge."
+            "9. Default to 'pass' when the edge is below 5%, when factors conflict, or when your lean rests mainly on season team-quality aggregates rather than a specific game-level edge.\n"
+            "10. AWAY-SIDE SKEPTICISM — calibration shows your road/underdog 'value' picks have been markedly less reliable than your home picks; you tend to over-rate the road team and find away value that doesn't materialize. The market prices road teams and underdogs accurately. Apply a HIGHER bar to any AWAY lean: only favor the road side over the market when the concrete, game-specific edge from rule 6 is unambiguous and clearly points to the away team (e.g. a genuine ace vs a replacement-level call-up, or a confirmed key absence on the home side) — never on aggregate stats, recent form, or a general sense the dog is live. If an away lean rests on anything softer than that, pass."
         ),
     },
     "icehockey_nhl": {
