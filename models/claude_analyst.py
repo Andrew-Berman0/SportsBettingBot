@@ -43,6 +43,15 @@ logger = logging.getLogger(__name__)
 #       (home is real and priced — don't fade it on aggregates) and rule 5 (softer
 #       market still prices quality/home; require a concrete edge, keep divergences
 #       modest). Small sample (~10 games), so a lighter touch than the MLB overhaul.
+#   mma_ufc=2 (2026-06-17): v1 was so pass-biased it bet nothing in its first weeks —
+#       rules 6 & 8 said "default to pass" and "thin data = pass", which vetoed even
+#       clean edges (e.g. a +7pt edge on a +174 live dog still returned pass because
+#       the fighter was thin-data). Reoriented: pass is reserved for genuinely close/
+#       contradictory reads and true debutants (1-2 bouts), not ordinary uncertainty;
+#       a sizable, well-grounded edge is now bettable, and live underdogs the market
+#       underrates are flagged as where MMA value concentrates (new rule 9). Heavy-
+#       favorite skepticism and the -300 min_odds backstop are unchanged. This is a
+#       deliberate learning experiment to generate settled UFC results — watch ROI.
 #   all others=1 (2026-06-13): first versioned state of each persona (unchanged at
 #       versioning introduction). Model: Sonnet 4.6 across all. Outcomes logged
 #       before this carry no analyst_version.
@@ -54,7 +63,7 @@ ANALYST_VERSIONS: dict[str, int] = {
     "baseball_mlb":          2,
     "icehockey_nhl":         1,
     "soccer_fifa_world_cup": 1,
-    "mma_ufc":               1,
+    "mma_ufc":               2,
 }
 
 
@@ -148,9 +157,10 @@ _ANALYST_PERSONAS: dict[str, dict[str, str]] = {
             "3. Physical edges matter: a large reach advantage favors a rangy, accurate striker; a southpaw-vs-orthodox matchup can disrupt the orthodox fighter. Weigh reach and stance alongside style, not in isolation.\n"
             "4. Age and decline: MMA fighters fall off sharply after ~35, especially cardio and chin. Lean toward the younger fighter when ages diverge and the older one is past their mid-30s.\n"
             "5. Finishing tendency: a high KO/TKO% means real one-shot upset equity even as an underdog; a decision-heavy fighter is lower variance. Use this when weighing live dogs against favorites.\n"
-            "6. MMA is extremely high-variance — anyone can be finished by a single strike. Be skeptical of heavy favorites priced -350 or worse, and default to 'pass' unless multiple factors (style, physicals, age) align behind one fighter.\n"
+            "6. MMA is extremely high-variance — anyone can be finished by a single strike. Be skeptical of heavy favorites priced -350 or worse. But do NOT reflexively pass every fight: when style, physicals, age, and finishing tendency line up behind one fighter and produce a clear edge over the market, that IS the bettable spot — back it. Reserve 'pass' for genuinely close or internally contradictory reads, not for the ordinary uncertainty that every fight carries.\n"
             "7. Records reflect quality but you are NOT given strength of schedule — do not over-read a gaudy record that may be built on weak opposition.\n"
-            "8. Thin data = pass. For debutants or fighters with very few bouts the stats are tiny-sample and unreliable; default to 'pass' rather than guessing."
+            "8. Data quality gates conviction, not betting outright. A true debutant or a fighter with only 1-2 pro bouts is tiny-sample — pass there. But a fighter with a real bout history whose stats, physicals, and style produce a sizable, well-grounded edge is bettable even when you'd like more data; don't let ordinary thin-ness veto a clear edge.\n"
+            "9. Live underdogs are where MMA value concentrates: a stylistic/physical/finishing edge on a +money fighter the market underrates is exactly the bet to make — do not pass it just because the other fighter is favored."
         ),
     },
 }
