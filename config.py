@@ -25,12 +25,15 @@ class BankrollConfig:
         "mma_ufc":               0.05,   # high variance — demand a larger edge
     })
     # Upper edge cap: in an efficient market a divergence this large is more likely a
-    # model error than real value, so pass it. Sports absent here are uncapped — NBA/
-    # WNBA/UFC are left out on purpose (legitimate large edges: playoff form, soft markets).
+    # model error than real value, so pass it. Sports absent here are uncapped — NBA/UFC
+    # are left out on purpose (legitimate large edges: playoff form, soft fight markets).
+    # WNBA added in v4: its away leans hit ~40% and a 13pt fade of a known-injury favorite
+    # got through uncapped — back the persona's magnitude rule with a hard ceiling.
     max_edge_by_sport: dict = field(default_factory=lambda: {
         "baseball_mlb":          0.12,
         "americanfootball_nfl":  0.12,
         "soccer_fifa_world_cup": 0.12,
+        "basketball_wnba":       0.12,
     })
     max_open_bets: int = 15              # max simultaneous bets
     min_odds: float = -300               # avoid heavy favorites (implied > 75%)
