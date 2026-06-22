@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 @dataclass
 class SportsConfig:
-    sports: list = field(default_factory=lambda: ["basketball_nba", "basketball_wnba", "americanfootball_nfl", "baseball_mlb", "icehockey_nhl", "soccer_fifa_world_cup", "mma_ufc"])
+    sports: list = field(default_factory=lambda: ["basketball_nba", "basketball_wnba", "americanfootball_nfl", "baseball_mlb", "icehockey_nhl", "soccer_fifa_world_cup"])
     primary_sport: str = "basketball_nba"
     bet_types: list = field(default_factory=lambda: ["h2h", "totals"])  # moneyline + over/under
     bookmakers: list = field(default_factory=lambda: ["fanduel", "draftkings", "betmgm"])
