@@ -32,7 +32,6 @@ SPORT_LABELS = {
     "icehockey_nhl":         "NHL",
     "americanfootball_nfl":  "NFL",
     "soccer_fifa_world_cup": "WC",
-    "mma_ufc":               "UFC",
 }
 
 
