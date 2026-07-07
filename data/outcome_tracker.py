@@ -45,6 +45,11 @@ class OutcomeTracker:
         Closed bets already carry the score; passed games are looked up via ESPN.
         Returns the number of new records written.
         """
+        # Re-sync the dedup set from disk each cycle. The in-memory set is otherwise
+        # only seeded at __init__, so a restart/overlapping run holding a stale set
+        # would re-log a settlement another run already wrote (the source of the
+        # earlier duplicate rows).
+        self._logged_ids = self._load_logged_ids()
         written = 0
         written += self._log_closed_bets(broker.closed_bets)
         written += self._log_passed_games(broker.passed_games)
