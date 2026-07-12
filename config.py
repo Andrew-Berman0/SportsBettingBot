@@ -35,6 +35,15 @@ class BankrollConfig:
         "soccer_fifa_world_cup": 0.12,
         "basketball_wnba":       0.12,
     })
+    # Hard backstop for MAGNITUDE DISCIPLINE, measured on the raw divergence
+    # |claude_home - book_home| (not the vig-adjusted edge, which max_edge caps). A move
+    # this far from the market's implied number is treated as an over-repricing and the
+    # game is passed. Only the compressed/efficient markets are capped here; NBA/NFL are
+    # left uncapped because a star/QB absence legitimately moves the line 10-15pt.
+    max_divergence_by_sport: dict = field(default_factory=lambda: {
+        "baseball_mlb":    0.11,
+        "basketball_wnba": 0.13,
+    })
     max_open_bets: int = 15              # max simultaneous bets
     min_odds: float = -300               # avoid heavy favorites (implied > 75%)
 

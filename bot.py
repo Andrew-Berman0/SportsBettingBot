@@ -477,6 +477,8 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     min_edge   = CONFIG.bankroll.min_edge_by_sport.get(sport, CONFIG.bankroll.min_edge)
     min_odds   = CONFIG.bankroll.min_odds   # skip heavy favorites (odds more negative than this)
     max_edge   = CONFIG.bankroll.max_edge_by_sport.get(sport)   # None = uncapped; pass implausible divergences
+    max_div    = CONFIG.bankroll.max_divergence_by_sport.get(sport)  # hard cap on |claude - market| (magnitude discipline)
+    divergence = abs(our_home_prob - book_home_prob)
     claude_rec = analysis["bet_recommendation"]
 
     stake = round(broker.bankroll * CONFIG.bankroll.flat_bet_pct, 2)
@@ -488,6 +490,8 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     if home_edge >= min_edge and claude_rec == "home_ml" and home_ml is not None:
         if max_edge is not None and home_edge > max_edge:
             logger.info(f"  Skipping {home_team} — edge {home_edge:+.0%} exceeds max_edge ({max_edge:.0%}); divergence implausibly large for {_SPORT_SHORT.get(sport, sport)}")
+        elif max_div is not None and divergence > max_div:
+            logger.info(f"  Skipping {home_team} — divergence {divergence:.0%} exceeds max_divergence ({max_div:.0%}); over-repricing the market for {_SPORT_SHORT.get(sport, sport)}")
         elif home_ml < min_odds:
             logger.info(f"  Skipping {home_team} — odds {home_ml:.0f} past min_odds ({min_odds:.0f}); favorite too heavy")
         elif stake >= 5.0:
@@ -505,6 +509,8 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     elif away_edge >= min_edge and claude_rec == "away_ml" and away_ml is not None:
         if max_edge is not None and away_edge > max_edge:
             logger.info(f"  Skipping {away_team} — edge {away_edge:+.0%} exceeds max_edge ({max_edge:.0%}); divergence implausibly large for {_SPORT_SHORT.get(sport, sport)}")
+        elif max_div is not None and divergence > max_div:
+            logger.info(f"  Skipping {away_team} — divergence {divergence:.0%} exceeds max_divergence ({max_div:.0%}); over-repricing the market for {_SPORT_SHORT.get(sport, sport)}")
         elif away_ml < min_odds:
             logger.info(f"  Skipping {away_team} — odds {away_ml:.0f} past min_odds ({min_odds:.0f}); favorite too heavy")
         elif stake >= 5.0:

@@ -25,6 +25,17 @@ logger = logging.getLogger(__name__)
 # A change that affects everyone (e.g. swapping the model) means bumping every entry.
 #
 # Changelog:
+#   ALL SPORTS +1 (2026-07-08): reason-to-the-number output fix (nba 2->3, wnba 4->5,
+#       mlb 3->4, nfl 1->2, nhl 1->2, wc 1->2). The JSON output emitted adjusted_home_prob
+#       FIRST and reasoning LAST, so the model committed to a probability before writing
+#       any reasoning — the number was an un-reasoned gut estimate and the "magnitude
+#       discipline" prose was written afterward to rationalize it (observed: prose said
+#       "modest, a few points" while the model had moved the line 12pt). Reordered the
+#       schema so reasoning comes FIRST and adjusted_home_prob LAST, and required the
+#       reasoning to state the market implied %, the settled %, and the point gap — so the
+#       number is the conclusion of the reasoning, not the premise. Global change, so all
+#       active sports bumped to keep calibration samples coherent. Paired with a hard
+#       max_divergence backstop in config (MLB/WNBA).
 #   baseball_mlb=1 (2026-06-13): first versioned MLB persona — season team-quality
 #       stats treated as already priced, no home-team fades on aggregates, concrete
 #       game-specific edge required; MLB min_edge 3%->5%.
@@ -89,13 +100,13 @@ logger = logging.getLogger(__name__)
 #       before this carry no analyst_version.
 #
 ANALYST_VERSIONS: dict[str, int] = {
-    "basketball_nba":        2,
-    "basketball_wnba":       4,
-    "americanfootball_nfl":  1,
-    "baseball_mlb":          3,
-    "icehockey_nhl":         1,
-    "soccer_fifa_world_cup": 1,
-    "mma_ufc":               2,
+    "basketball_nba":        3,
+    "basketball_wnba":       5,
+    "americanfootball_nfl":  2,
+    "baseball_mlb":          4,
+    "icehockey_nhl":         2,
+    "soccer_fifa_world_cup": 2,
+    "mma_ufc":               2,   # inactive
 }
 
 
@@ -610,11 +621,13 @@ Apply your framework above to this data and estimate win probability. Weigh all 
 
 {player_rule}
 
-Respond ONLY with valid JSON in this exact format:
+Reason to your number — do NOT state a probability first and justify it after. Work through the logic, and BEFORE committing to the number state three things explicitly: the market's implied home probability, the home probability you are settling on, and the gap between them in percentage points. Keep that gap proportionate to your evidence and to the magnitude limits in your framework — a large gap demands a concrete roster-level justification, never aggregates or already-priced information.
+
+Respond ONLY with valid JSON in this exact format. The field order matters: "reasoning" comes FIRST and "adjusted_home_prob" LAST — your probability must be the conclusion of your reasoning, not the premise.
 {{
-  "adjusted_home_prob": <float between 0 and 1>,
+  "reasoning": "<2-4 sentences. State the market's implied home %, the % you are settling on, and the point gap between them, and why that gap is justified.>",
   "confidence": "<low|medium|high>",
-  "reasoning": "<2-3 sentences explaining your adjustment>",
+  "adjusted_home_prob": <float between 0 and 1 — must equal the settled % you stated in your reasoning>,
   "bet_recommendation": "<home_ml|away_ml|pass>"
 }}"""
 
