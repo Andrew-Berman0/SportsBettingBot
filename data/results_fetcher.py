@@ -190,6 +190,7 @@ class ResultsFetcher:
                                 and self._teams_match(b["away_team"], away["name"])
                                 and self._game_has_started(b.get("commence_time"), now)
                                 and self._result_date_matches(result_date, b.get("commence_time"))
+                                and self._start_time_aligns(event.get("date"), b.get("commence_time"))
                             ]
                             if matching:
                                 game_id = matching[0]["game_id"]
@@ -212,6 +213,7 @@ class ResultsFetcher:
                                 if self._teams_match(b["home_team"], home["name"])
                                 and self._teams_match(b["away_team"], away["name"])
                                 and self._result_date_matches(result_date, b.get("commence_time"))
+                                and self._start_time_aligns(event.get("date"), b.get("commence_time"))
                             ]
                             if matching:
                                 game_id = matching[0]["game_id"]
@@ -344,5 +346,22 @@ class ResultsFetcher:
                 game_et_date.strftime("%Y-%m-%d"),
                 next_et_date.strftime("%Y-%m-%d"),
             )
+        except Exception:
+            return True
+
+    @staticmethod
+    def _start_time_aligns(event_start: str | None, commence_time: str | None,
+                           tol_hours: float = 2.0) -> bool:
+        """Disambiguates DOUBLEHEADERS: two same-day games between the same teams both
+        match on name + date, so name-only matching settles the wrong game (this is how a
+        Reds 2-0 win got booked as a 5-6 loss). Require the ESPN event's start time to be
+        within tol_hours of the bet's commence_time. Falls back to True when either time is
+        missing so single games (with minor provider skew) still settle."""
+        if not event_start or not commence_time:
+            return True
+        try:
+            es = datetime.fromisoformat(event_start.replace("Z", "+00:00"))
+            cs = datetime.fromisoformat(commence_time.replace("Z", "+00:00"))
+            return abs((es - cs).total_seconds()) <= tol_hours * 3600
         except Exception:
             return True
