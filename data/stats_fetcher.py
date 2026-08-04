@@ -309,6 +309,28 @@ class ESPNStatsFetcher:
         self._series_cache: dict = {}  # {(sport_key, home_nick, away_nick): (ts, str|None)}
         self._throws_cache: dict = {}  # {athlete_id: "L"|"R"|None}
         self._rates_cache:  dict = {}  # {athlete_id: {ip, gs, whip, k9, kbb}}
+        self._scoreboard_cache: dict = {}  # {date_str: (ts, events)} — shared across games to avoid rate limits
+
+    _SCOREBOARD_TTL = 900  # seconds; probables don't change within an evaluation slate
+
+    def _mlb_scoreboard_events(self, date_str: str) -> list:
+        """Fetch (and cache) the MLB scoreboard for a date. Cached across all games in a
+        slate: get_starting_pitchers is called once per game, and re-downloading the whole
+        scoreboard each time hammered ESPN into 403 'Access Denied' (every pitcher then came
+        back empty -> 'starting pitcher' data gaps on every game). One fetch per date now."""
+        hit = self._scoreboard_cache.get(date_str)
+        if hit and (time.time() - hit[0]) < self._SCOREBOARD_TTL:
+            return hit[1]
+        url = f"{self._SCOREBOARD_BASE}/baseball/mlb/scoreboard?dates={date_str}"
+        try:
+            resp = self.session.get(url, timeout=10)
+            resp.raise_for_status()
+            events = resp.json().get("events", [])
+            self._scoreboard_cache[date_str] = (time.time(), events)
+            return events
+        except Exception as e:
+            logger.warning(f"MLB scoreboard fetch failed ({date_str}): {e}")
+            return hit[1] if hit else []
 
     def get_team_stats(self, sport_key: str) -> pd.DataFrame:
         """Returns basic team stats (win%, point diff) for the given sport."""
@@ -418,12 +440,8 @@ class ESPNStatsFetcher:
 
         for delta in range(2):
             d = date.today() + timedelta(days=delta)
-            url = (f"{self._SCOREBOARD_BASE}/baseball/mlb/scoreboard"
-                   f"?dates={d.strftime('%Y%m%d')}")
             try:
-                resp = self.session.get(url, timeout=10)
-                resp.raise_for_status()
-                for event in resp.json().get("events", []):
+                for event in self._mlb_scoreboard_events(d.strftime("%Y%m%d")):
                     for comp in event.get("competitions", []):
                         competitors = comp.get("competitors", [])
                         home_c = next((c for c in competitors if c.get("homeAway") == "home"), None)
