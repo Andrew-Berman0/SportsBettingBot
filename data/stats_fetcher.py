@@ -307,31 +307,6 @@ class ESPNStatsFetcher:
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "Mozilla/5.0"})
         self._series_cache: dict = {}  # {(sport_key, home_nick, away_nick): (ts, str|None)}
-        self._mlb_sched_cache:   dict = {}  # {date_str: (ts, games)} — one statsapi call per slate
-        self._mlb_pitcher_cache: dict = {}  # {pitcher_id: stats dict}
-
-    _SCHED_TTL    = 900  # seconds; probables don't change within an evaluation slate
-    _MLB_STATSAPI = "https://statsapi.mlb.com/api/v1"
-
-    def _mlb_schedule(self, date_str: str) -> list:
-        """Fetch (and cache) the day's MLB schedule with probable pitchers from the official
-        MLB Stats API. Replaces the ESPN scoreboard, which Akamai rate-limited into 403s.
-        One call returns every game's probables; cached across all games in a slate."""
-        hit = self._mlb_sched_cache.get(date_str)
-        if hit and (time.time() - hit[0]) < self._SCHED_TTL:
-            return hit[1]
-        try:
-            r = self.session.get(f"{self._MLB_STATSAPI}/schedule",
-                                 params={"sportId": 1, "date": date_str, "hydrate": "probablePitcher"},
-                                 timeout=12)
-            r.raise_for_status()
-            dates = r.json().get("dates", [])
-            games = dates[0]["games"] if dates else []
-            self._mlb_sched_cache[date_str] = (time.time(), games)
-            return games
-        except Exception as e:
-            logger.warning(f"MLB schedule fetch failed ({date_str}): {e}")
-            return hit[1] if hit else []
 
     def get_team_stats(self, sport_key: str) -> pd.DataFrame:
         """Returns basic team stats (win%, point diff) for the given sport."""
@@ -428,79 +403,6 @@ class ESPNStatsFetcher:
         if result:
             logger.info(f"Series context for {away_team} @ {home_team}: {result}")
         return result
-
-    def get_starting_pitchers(self, home_team: str, away_team: str) -> dict:
-        """
-        Probable starting pitchers for an MLB game from the official MLB Stats API
-        (statsapi.mlb.com) — replaces the ESPN scoreboard, which Akamai rate-limited into
-        403s. Checks today and tomorrow. Result: {"home": {...}, "away": {...}} or {}.
-        Each side carries: name, record, era, wins, losses, throws, ip, gs, whip, k9, kbb.
-        """
-        from datetime import date, timedelta
-        for delta in range(2):
-            d = (date.today() + timedelta(days=delta)).strftime("%Y-%m-%d")
-            for g in self._mlb_schedule(d):
-                teams = g.get("teams", {})
-                h, a = teams.get("home", {}), teams.get("away", {})
-                h_name = (h.get("team") or {}).get("name", "")
-                a_name = (a.get("team") or {}).get("name", "")
-                if self._mlb_team_matches(home_team, h_name) and self._mlb_team_matches(away_team, a_name):
-                    result = {}
-                    for side, td in (("home", h), ("away", a)):
-                        pp = td.get("probablePitcher") or {}
-                        pid = pp.get("id")
-                        result[side] = (self._fetch_mlb_pitcher(pid, pp.get("fullName", "TBD"))
-                                        if pid else {"name": "TBD", "record": "", "era": "?"})
-                    logger.info(
-                        f"Starters: {away_team} ({result.get('away',{}).get('name','?')}) "
-                        f"@ {home_team} ({result.get('home',{}).get('name','?')})"
-                    )
-                    return result
-        return {}
-
-    def _fetch_mlb_pitcher(self, pid, name: str) -> dict:
-        """Season pitching line for a statsapi pitcher id: ERA/W-L plus handedness and the
-        IP/GS/WHIP/K9/K-BB peripherals. Cached in memory (season stats move slowly)."""
-        if pid in self._mlb_pitcher_cache:
-            return self._mlb_pitcher_cache[pid]
-        out = {"name": name, "record": "", "era": "?"}
-        try:
-            r = self.session.get(f"{self._MLB_STATSAPI}/people/{pid}",
-                                 params={"hydrate": "stats(group=pitching,type=season)"}, timeout=12)
-            r.raise_for_status()
-            p = (r.json().get("people") or [{}])[0]
-            hand = (p.get("pitchHand") or {}).get("code")
-            splits = ((p.get("stats") or [{}])[0].get("splits") or [])
-            st = splits[0].get("stat", {}) if splits else {}
-            w, l = st.get("wins"), st.get("losses")
-            out = {
-                "name":   p.get("fullName", name),
-                "record": f"{w}-{l}" if w is not None and l is not None else "",
-                "era":    st.get("era", "?"),
-                "wins":   w,
-                "losses": l,
-                "throws": hand if hand in ("L", "R") else None,
-                "ip":     st.get("inningsPitched"),
-                "gs":     st.get("gamesStarted"),
-                "whip":   st.get("whip"),
-                "k9":     st.get("strikeoutsPer9Inn"),
-                "kbb":    st.get("strikeoutWalkRatio"),
-            }
-        except Exception as e:
-            logger.warning(f"MLB pitcher stats fetch failed ({pid}): {e}")
-        self._mlb_pitcher_cache[pid] = out
-        return out
-
-    @staticmethod
-    def _mlb_team_matches(bet_name: str, api_name: str) -> bool:
-        """Match a bet's team name to a statsapi team name by nickname (last word), with a
-        city check only for the Sox (Boston Red Sox vs Chicago White Sox both end 'sox')."""
-        b, a = bet_name.lower().split(), api_name.lower().split()
-        if not b or not a or b[-1] != a[-1]:
-            return False
-        if b[-1] == "sox":
-            return b[0] == a[0]
-        return True
 
 
 class NHLStatsFetcher:
@@ -894,10 +796,109 @@ class MLBStatsFetcher:
 
     _BASE = "https://statsapi.mlb.com/api/v1"
     _CACHE_TTL_HOURS = 6
+    _SCHED_TTL = 900  # seconds; probables don't change within an evaluation slate
 
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "Mozilla/5.0"})
+        self._sched_cache:   dict = {}  # {date_str: (ts, games)} — one schedule call per slate
+        self._pitcher_cache: dict = {}  # {pitcher_id: stats dict}
+
+    # ------------------------------------------------------------------
+    # Probable starting pitchers (migrated off the ESPN scoreboard, which Akamai
+    # rate-limited into 403s). One schedule call returns every game's probables.
+    # ------------------------------------------------------------------
+
+    def get_starting_pitchers(self, home_team: str, away_team: str) -> dict:
+        """
+        Probable starting pitchers for an MLB game. Checks today and tomorrow.
+        Result: {"home": {...}, "away": {...}} or {}. Each side carries:
+        name, record, era, wins, losses, throws, ip, gs, whip, k9, kbb.
+        """
+        from datetime import date, timedelta
+        for delta in range(2):
+            d = (date.today() + timedelta(days=delta)).strftime("%Y-%m-%d")
+            for g in self._schedule(d):
+                teams = g.get("teams", {})
+                h, a = teams.get("home", {}), teams.get("away", {})
+                h_name = (h.get("team") or {}).get("name", "")
+                a_name = (a.get("team") or {}).get("name", "")
+                if self._team_matches(home_team, h_name) and self._team_matches(away_team, a_name):
+                    result = {}
+                    for side, td in (("home", h), ("away", a)):
+                        pp = td.get("probablePitcher") or {}
+                        pid = pp.get("id")
+                        result[side] = (self._fetch_pitcher(pid, pp.get("fullName", "TBD"))
+                                        if pid else {"name": "TBD", "record": "", "era": "?"})
+                    logger.info(
+                        f"Starters: {away_team} ({result.get('away',{}).get('name','?')}) "
+                        f"@ {home_team} ({result.get('home',{}).get('name','?')})"
+                    )
+                    return result
+        return {}
+
+    def _schedule(self, date_str: str) -> list:
+        """Fetch (and cache) the day's schedule with probable pitchers. One call returns
+        every game's probables; cached across all games in a slate."""
+        hit = self._sched_cache.get(date_str)
+        if hit and (time.time() - hit[0]) < self._SCHED_TTL:
+            return hit[1]
+        try:
+            r = self.session.get(f"{self._BASE}/schedule",
+                                 params={"sportId": 1, "date": date_str, "hydrate": "probablePitcher"},
+                                 timeout=12)
+            r.raise_for_status()
+            dates = r.json().get("dates", [])
+            games = dates[0]["games"] if dates else []
+            self._sched_cache[date_str] = (time.time(), games)
+            return games
+        except Exception as e:
+            logger.warning(f"MLB schedule fetch failed ({date_str}): {e}")
+            return hit[1] if hit else []
+
+    def _fetch_pitcher(self, pid, name: str) -> dict:
+        """Season pitching line for a pitcher id: ERA/W-L plus handedness and the
+        IP/GS/WHIP/K9/K-BB peripherals. Cached in memory (season stats move slowly)."""
+        if pid in self._pitcher_cache:
+            return self._pitcher_cache[pid]
+        out = {"name": name, "record": "", "era": "?"}
+        try:
+            r = self.session.get(f"{self._BASE}/people/{pid}",
+                                 params={"hydrate": "stats(group=pitching,type=season)"}, timeout=12)
+            r.raise_for_status()
+            p = (r.json().get("people") or [{}])[0]
+            hand = (p.get("pitchHand") or {}).get("code")
+            splits = ((p.get("stats") or [{}])[0].get("splits") or [])
+            st = splits[0].get("stat", {}) if splits else {}
+            w, l = st.get("wins"), st.get("losses")
+            out = {
+                "name":   p.get("fullName", name),
+                "record": f"{w}-{l}" if w is not None and l is not None else "",
+                "era":    st.get("era", "?"),
+                "wins":   w,
+                "losses": l,
+                "throws": hand if hand in ("L", "R") else None,
+                "ip":     st.get("inningsPitched"),
+                "gs":     st.get("gamesStarted"),
+                "whip":   st.get("whip"),
+                "k9":     st.get("strikeoutsPer9Inn"),
+                "kbb":    st.get("strikeoutWalkRatio"),
+            }
+        except Exception as e:
+            logger.warning(f"MLB pitcher stats fetch failed ({pid}): {e}")
+        self._pitcher_cache[pid] = out
+        return out
+
+    @staticmethod
+    def _team_matches(bet_name: str, api_name: str) -> bool:
+        """Match a bet's team name to a statsapi team name by nickname (last word), with a
+        city check only for the Sox (Boston Red Sox vs Chicago White Sox both end 'sox')."""
+        b, a = bet_name.lower().split(), api_name.lower().split()
+        if not b or not a or b[-1] != a[-1]:
+            return False
+        if b[-1] == "sox":
+            return b[0] == a[0]
+        return True
 
     def get_team_stats(self, season: int | None = None) -> pd.DataFrame:
         """

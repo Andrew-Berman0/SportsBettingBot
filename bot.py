@@ -319,7 +319,8 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
                   weather_fetcher: WeatherFetcher | None = None,
                   world_cup_fetcher: WorldCupFetcher | None = None,
                   wnba_fetcher: WNBAStatsFetcher | None = None,
-                  ufc_fetcher: UFCFetcher | None = None) -> None:
+                  ufc_fetcher: UFCFetcher | None = None,
+                  mlb_fetcher: MLBStatsFetcher | None = None) -> None:
     """Run the full analysis pipeline for a single game and place a bet if value found."""
     game = game_raw if game_raw.get("_pre_parsed") else OddsFetcher.parse_game(game_raw)
     if not game:
@@ -430,8 +431,8 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
 
     # Fetch probable starting pitchers for MLB — biggest single factor in game outcome
     starting_pitchers = {}
-    if sport == "baseball_mlb":
-        starting_pitchers = espn_fetcher.get_starting_pitchers(home_team, away_team)
+    if sport == "baseball_mlb" and mlb_fetcher is not None:
+        starting_pitchers = mlb_fetcher.get_starting_pitchers(home_team, away_team)
 
     # Alert (admin push) if any critical data stream came back empty before Claude analyzes
     _missing = _detect_missing_data(
@@ -711,6 +712,7 @@ def run_loop():
                     world_cup_fetcher=world_cup_fetcher,
                     wnba_fetcher=wnba_fetcher,
                     ufc_fetcher=ufc_fetcher,
+                    mlb_fetcher=mlb_fetcher,
                 )
 
             # 5. Summary
