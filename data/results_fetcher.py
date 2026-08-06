@@ -27,9 +27,23 @@ SPORT_ESPN_MAP = {
 
 class ResultsFetcher:
 
+    _STATSAPI = "https://statsapi.mlb.com/api/v1"
+
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "Mozilla/5.0"})
+
+    def _mlb_games_on(self, date_str: str) -> list:
+        """All MLB games on a date from statsapi (carries scores, status, and start time)."""
+        try:
+            r = self.session.get(f"{self._STATSAPI}/schedule",
+                                 params={"sportId": 1, "date": date_str}, timeout=12)
+            r.raise_for_status()
+            dates = r.json().get("dates", [])
+            return dates[0]["games"] if dates else []
+        except Exception as e:
+            logger.warning(f"MLB results fetch failed ({date_str}): {e}")
+            return []
 
     def get_completed_games(self, days_back: int = 2,
                             sport: str = "basketball_nba") -> list[dict]:
@@ -39,6 +53,8 @@ class ResultsFetcher:
         """
         if sport == "mma_ufc":
             return self._completed_mma(days_back)
+        if sport == "baseball_mlb":
+            return self._completed_mlb_games(days_back)
         if sport not in SPORT_ESPN_MAP:
             return []
 
@@ -76,6 +92,79 @@ class ResultsFetcher:
             except Exception as e:
                 logger.warning(f"ResultsFetcher error for {sport} {date}: {e}")
         return results
+
+    def _completed_mlb_games(self, days_back: int) -> list[dict]:
+        """Completed MLB games from statsapi (for outcome logging): name/score/date."""
+        results = []
+        for days_ago in range(days_back + 1):
+            d = (datetime.now(timezone.utc) - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+            for g in self._mlb_games_on(d):
+                if g.get("status", {}).get("abstractGameState") != "Final":
+                    continue
+                teams = g.get("teams", {})
+                h, a = teams.get("home", {}), teams.get("away", {})
+                if h.get("score") is None or a.get("score") is None:
+                    continue
+                results.append({
+                    "home_team":  (h.get("team") or {}).get("name", ""),
+                    "away_team":  (a.get("team") or {}).get("name", ""),
+                    "home_score": int(h["score"]),
+                    "away_score": int(a["score"]),
+                    "date":       d,
+                })
+        return results
+
+    def _settle_mlb(self, sport_bets: list, broker, now: datetime) -> int:
+        """Settle/void MLB bets from statsapi.mlb.com. Keeps MLB off ESPN's rate-limited
+        scoreboard, and uses each game's start time to disambiguate doubleheaders."""
+        days_back = 3
+        for b in sport_bets:
+            ct = b.get("commence_time")
+            if ct:
+                try:
+                    start = datetime.fromisoformat(ct.replace("Z", "+00:00"))
+                    days_back = max(days_back, (now - start).days + 1)
+                except Exception:
+                    pass
+        days_back = min(days_back, 30)
+
+        settled_count = 0
+        remaining = list(sport_bets)
+        for days_ago in range(days_back + 1):
+            if not remaining:
+                break
+            d = (now - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+            for g in self._mlb_games_on(d):
+                teams  = g.get("teams", {})
+                h, a   = teams.get("home", {}), teams.get("away", {})
+                h_name = (h.get("team") or {}).get("name", "")
+                a_name = (a.get("team") or {}).get("name", "")
+                status = g.get("status", {})
+                matching = [
+                    b for b in remaining
+                    if self._teams_match(b["home_team"], h_name)
+                    and self._teams_match(b["away_team"], a_name)
+                    and self._game_has_started(b.get("commence_time"), now)
+                    and self._start_time_aligns(g.get("gameDate"), b.get("commence_time"))
+                ]
+                if not matching:
+                    continue
+                gid = matching[0]["game_id"]
+                if (status.get("abstractGameState") == "Final"
+                        and h.get("score") is not None and a.get("score") is not None):
+                    logger.info(f"Settling {a_name} @ {h_name} ({a['score']}-{h['score']}) [baseball_mlb]")
+                    settled = broker.settle_bet(game_id=gid,
+                                                home_score=int(h["score"]),
+                                                away_score=int(a["score"]))
+                    settled_count += len(settled)
+                    remaining = [b for b in remaining if b["game_id"] != gid]
+                elif status.get("detailedState", "") in ("Postponed", "Cancelled", "Canceled"):
+                    reason = status["detailedState"].lower()
+                    logger.info(f"Voiding {a_name} @ {h_name} — {reason} [baseball_mlb]")
+                    voided = broker.void_bet(game_id=gid, reason=reason)
+                    settled_count += len(voided)
+                    remaining = [b for b in remaining if b["game_id"] != gid]
+        return settled_count
 
     def _completed_mma(self, days_back: int) -> list[dict]:
         """
@@ -138,6 +227,11 @@ class ResultsFetcher:
                 # MMA settles by winner (no scores), and a card is one event with many
                 # fights — needs its own path rather than the team score-comparison logic.
                 settled_count += self._settle_mma(sport_bets, broker, now)
+                continue
+            if sport == "baseball_mlb":
+                # MLB settles from the official MLB API (statsapi), not ESPN's rate-limited
+                # scoreboard — and its clean per-game start times disambiguate doubleheaders.
+                settled_count += self._settle_mlb(sport_bets, broker, now)
                 continue
             if sport not in SPORT_ESPN_MAP:
                 logger.debug(f"No ESPN scoreboard configured for sport '{sport}' — skipping settlement")
