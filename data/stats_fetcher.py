@@ -846,7 +846,12 @@ class MLBStatsFetcher:
                     if not name:
                         continue
                     parts = name.split()
-                    short = f"{parts[0][0]}. {parts[-1]}" if len(parts) > 1 else name
+                    if len(parts) > 1:
+                        # skip a Jr./Sr./III suffix so the surname isn't "Jr."
+                        surname = parts[-2] if len(parts) > 2 and parts[-1].lower().rstrip(".") in ("jr", "sr", "ii", "iii", "iv") else parts[-1]
+                        short = f"{parts[0][0]}. {surname}"
+                    else:
+                        short = name
                     by_pos.setdefault(pos, []).append(short)
                 ordered = [pos for pos in self._POS_ORDER if pos in by_pos] + \
                           [pos for pos in by_pos if pos not in self._POS_ORDER]
