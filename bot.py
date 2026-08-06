@@ -405,8 +405,13 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
     else:
         home_injuries = injury_fetcher.get_team_injuries(home_team, sport=sport, max_age_minutes=30)
         away_injuries = injury_fetcher.get_team_injuries(away_team, sport=sport, max_age_minutes=30)
-        home_roster   = roster_fetcher.get_roster_string(home_team, sport=sport)
-        away_roster   = roster_fetcher.get_roster_string(away_team, sport=sport)
+        if sport == "baseball_mlb" and mlb_fetcher is not None:
+            # Lineup from the official MLB API (statsapi) — keeps MLB off the ESPN roster call.
+            home_roster = mlb_fetcher.get_roster_string(home_team)
+            away_roster = mlb_fetcher.get_roster_string(away_team)
+        else:
+            home_roster = roster_fetcher.get_roster_string(home_team, sport=sport)
+            away_roster = roster_fetcher.get_roster_string(away_team, sport=sport)
     if home_injuries or away_injuries:
         logger.info(f"  Injuries — {home_team}: {len(home_injuries)} | {away_team}: {len(away_injuries)}")
 

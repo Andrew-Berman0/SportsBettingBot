@@ -803,6 +803,59 @@ class MLBStatsFetcher:
         self.session.headers.update({"User-Agent": "Mozilla/5.0"})
         self._sched_cache:   dict = {}  # {date_str: (ts, games)} — one schedule call per slate
         self._pitcher_cache: dict = {}  # {pitcher_id: stats dict}
+        self._team_id_map:   dict = {}  # {team_name_lower: team_id}
+        self._roster_cache:  dict = {}  # {team_name_lower: (ts, str)}
+
+    _POS_ORDER = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH", "OF", "IF"]
+
+    def _team_id(self, team_name: str):
+        if not self._team_id_map:
+            try:
+                t = self.session.get(f"{self._BASE}/teams", params={"sportId": 1}, timeout=12).json()
+                self._team_id_map = {x["name"].lower(): x["id"] for x in t.get("teams", [])}
+            except Exception as e:
+                logger.warning(f"MLB team list fetch failed: {e}")
+                self._team_id_map = {}
+        name = team_name.lower()
+        if name in self._team_id_map:
+            return self._team_id_map[name]
+        nick = team_name.split()[-1].lower()
+        return next((i for n, i in self._team_id_map.items() if n.split()[-1] == nick), None)
+
+    def get_roster_string(self, team_name: str) -> str:
+        """Compact batting lineup (position players) from statsapi, for the prompt — the
+        pitching staff is already covered by the starter + bullpen data. Replaces the ESPN
+        roster call, keeping MLB fully off the rate-limited ESPN host. Cached 6h per team."""
+        key = team_name.lower()
+        hit = self._roster_cache.get(key)
+        if hit and (time.time() - hit[0]) < self._CACHE_TTL_HOURS * 3600:
+            return hit[1]
+        tid = self._team_id(team_name)
+        out = "Not available"
+        if tid:
+            try:
+                r = self.session.get(f"{self._BASE}/teams/{tid}/roster",
+                                     params={"rosterType": "active"}, timeout=12)
+                r.raise_for_status()
+                by_pos: dict = {}
+                for p in r.json().get("roster", []):
+                    pos = (p.get("position") or {}).get("abbreviation", "")
+                    if pos in ("", "P"):   # skip pitchers — covered by starter/bullpen data
+                        continue
+                    name = (p.get("person") or {}).get("fullName", "")
+                    if not name:
+                        continue
+                    parts = name.split()
+                    short = f"{parts[0][0]}. {parts[-1]}" if len(parts) > 1 else name
+                    by_pos.setdefault(pos, []).append(short)
+                ordered = [pos for pos in self._POS_ORDER if pos in by_pos] + \
+                          [pos for pos in by_pos if pos not in self._POS_ORDER]
+                parts_out = [", ".join(f"{n} ({pos})" for n in by_pos[pos]) for pos in ordered]
+                out = ", ".join(parts_out) or "Not available"
+            except Exception as e:
+                logger.warning(f"MLB roster fetch failed for {team_name}: {e}")
+        self._roster_cache[key] = (time.time(), out)
+        return out
 
     # ------------------------------------------------------------------
     # Probable starting pitchers (migrated off the ESPN scoreboard, which Akamai
