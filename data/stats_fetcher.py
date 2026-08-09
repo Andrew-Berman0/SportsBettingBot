@@ -593,61 +593,56 @@ class NHLStatsFetcher:
 
 class WNBAStatsFetcher:
     """
-    Augments ESPN standings data with per-team shooting and ball-control
-    stats from ESPN's team statistics endpoint.
-    Adds: FG%, 3PT%, assist-to-turnover ratio, turnovers/game, rebounds/game.
-    No API key required. Fetches once per team per session (15 calls, cached 6h).
+    WNBA team stats, key players, rest days, and injuries — ALL from ESPN's CORE API
+    (sports.core.api.espn.com). The public site.api host is Akamai rate-limited (403s from
+    the server), so this fetcher was migrated onto the core API, which is not blocked.
+    The core API is reference-style: list endpoints return $refs that must be resolved.
+    No API key required. Cached per team 6h (stats/rosters/schedule move slowly).
     """
 
-    _TEAMS_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/teams"
-    _STATS_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/teams/{tid}/statistics"
+    _CORE = "https://sports.core.api.espn.com/v2/sports/basketball/leagues/wnba"
     _CACHE_TTL_HOURS = 6
-
-    _SCHEDULE_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/teams/{tid}/schedule"
-    _ROSTER_URL   = "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/teams/{tid}/roster"
-    _CORE_BASE    = "https://sports.core.api.espn.com/v2/sports/basketball/leagues/wnba"
+    _INJ_TTL = 1800  # seconds — injuries change more often than stats
 
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "Mozilla/5.0"})
-        self._team_id_map: dict[str, str] = {}  # displayName.lower() -> team_id
+        self._team_id_map: dict[str, str] = {}   # displayName.lower() -> team_id
+        self._inj_cache: dict = {}               # {tid: (ts, [injuries])}
 
-    def get_rest_days(self, team_name: str, game_date: datetime) -> int | None:
-        """
-        Returns days since the team's last completed game before game_date.
-        0 = back-to-back. None = schedule unavailable.
-        """
-        tid = self._resolve_team_id(team_name)
-        if not tid:
-            return None
-        target = game_date.date() if hasattr(game_date, "date") else game_date
-        try:
-            r = self.session.get(self._SCHEDULE_URL.format(tid=tid), timeout=10)
-            r.raise_for_status()
-            played = []
-            for e in r.json().get("events", []):
-                comp = (e.get("competitions") or [{}])[0]
-                if not comp.get("status", {}).get("type", {}).get("completed"):
-                    continue
-                try:
-                    gd = datetime.fromisoformat(e["date"].replace("Z", "+00:00")).date()
-                    if gd < target:
-                        played.append(gd)
-                except (KeyError, ValueError):
-                    pass
-            if not played:
-                return None
-            return (target - max(played)).days
-        except Exception as e:
-            logger.warning(f"WNBA rest days failed for {team_name}: {e}")
-            return None
+    def _get(self, url: str) -> dict:
+        # core API hands back http:// refs; force https to avoid a redirect hop.
+        if url.startswith("http://"):
+            url = "https://" + url[len("http://"):]
+        r = self.session.get(url, timeout=12)
+        r.raise_for_status()
+        return r.json()
+
+    def _season(self) -> int:
+        return datetime.today().year
+
+    # ------------------------------------------------------------------
+    # Team id resolution (core API teams list → resolve each $ref)
+    # ------------------------------------------------------------------
+
+    def _fetch_team_list(self) -> list[tuple[str, str]]:
+        out = []
+        for it in self._get(f"{self._CORE}/teams?limit=50").get("items", []):
+            ref = it.get("$ref")
+            if not ref:
+                continue
+            try:
+                t = self._get(ref)
+                if t.get("id") and t.get("displayName"):
+                    out.append((str(t["id"]), t["displayName"]))
+            except Exception:
+                pass
+        return out
 
     def _resolve_team_id(self, team_name: str) -> str | None:
         if not self._team_id_map:
             try:
-                self._team_id_map = {
-                    name.lower(): tid for tid, name in self._fetch_team_list()
-                }
+                self._team_id_map = {name.lower(): tid for tid, name in self._fetch_team_list()}
             except Exception as e:
                 logger.warning(f"WNBA team list fetch failed: {e}")
                 self._team_id_map = {}
@@ -655,58 +650,46 @@ class WNBAStatsFetcher:
         if name in self._team_id_map:
             return self._team_id_map[name]
         nick = team_name.split()[-1].lower()
-        return next(
-            (tid for n, tid in self._team_id_map.items() if n.split()[-1] == nick),
-            None,
-        )
+        return next((tid for n, tid in self._team_id_map.items() if n.split()[-1] == nick), None)
+
+    # ------------------------------------------------------------------
+    # Team stats
+    # ------------------------------------------------------------------
 
     def get_team_stats(self) -> pd.DataFrame:
-        """
-        Returns a DataFrame with one row per WNBA team:
-          team, fg_pct, three_pct, ast_to_ratio, avg_turnovers,
-          avg_rebounds, avg_off_rebounds
-        """
+        """One row per WNBA team: team, fg_pct, three_pct, ast_to_ratio, avg_turnovers,
+        avg_rebounds, avg_off_rebounds, avg_steals, avg_blocks."""
         cache_file = CACHE_DIR / f"wnba_advanced_stats_{datetime.today().year}.parquet"
         if cache_file.exists():
             age_hours = (time.time() - cache_file.stat().st_mtime) / 3600
             if age_hours < self._CACHE_TTL_HOURS:
                 return pd.read_parquet(cache_file)
-
         try:
             teams = self._fetch_team_list()
+            self._team_id_map = {name.lower(): tid for tid, name in teams}
             rows = []
             for tid, tname in teams:
                 stats = self._fetch_team_stats(tid)
                 if stats:
                     rows.append({"team": tname, **stats})
-                time.sleep(0.2)
             df = pd.DataFrame(rows)
-            df.to_parquet(cache_file)
-            logger.info(f"Fetched WNBA advanced stats: {len(df)} teams")
+            if not df.empty:
+                df.to_parquet(cache_file)
+            logger.info(f"Fetched WNBA advanced stats: {len(df)} teams (core API)")
             return df
         except Exception as e:
             logger.error(f"WNBA advanced stats fetch error: {e}")
             return pd.DataFrame()
 
-    def _fetch_team_list(self) -> list[tuple[str, str]]:
-        r = self.session.get(self._TEAMS_URL, timeout=10)
-        r.raise_for_status()
-        teams = (r.json().get("sports", [{}])[0]
-                  .get("leagues", [{}])[0]
-                  .get("teams", []))
-        return [(t["team"]["id"], t["team"]["displayName"]) for t in teams]
-
     def _fetch_team_stats(self, tid: str) -> dict:
         try:
-            r = self.session.get(self._STATS_URL.format(tid=tid), timeout=10)
-            r.raise_for_status()
-            cats = (r.json().get("results", {})
-                     .get("stats", {})
-                     .get("categories", []))
+            data = self._get(f"{self._CORE}/seasons/{self._season()}/types/2/teams/{tid}/statistics")
             flat = {}
-            for cat in cats:
+            for cat in data.get("splits", {}).get("categories", []):
                 for stat in cat.get("stats", []):
-                    flat[stat["name"]] = stat.get("value")
+                    flat[stat.get("name")] = stat.get("value")
+            if flat.get("fieldGoalPct") is None:
+                return {}
             return {
                 "fg_pct":           flat.get("fieldGoalPct"),
                 "three_pct":        flat.get("threePointPct"),
@@ -720,12 +703,13 @@ class WNBAStatsFetcher:
         except Exception:
             return {}
 
+    # ------------------------------------------------------------------
+    # Key players (roster athletes → per-athlete season averages)
+    # ------------------------------------------------------------------
+
     def get_player_stats(self, team_name: str, top_n: int = 6) -> list[dict]:
         """Top season scorers for a team: [{name, pos, ppg, rpg, apg, mpg}], sorted by PPG.
-        The WNBA persona weights individual players heavily (one star's absence can swing a
-        game), but it was only given team aggregates + injury NAMES — no way to gauge how
-        good an injured player is. This supplies per-player production so the persona is
-        actionable. Cached on disk per team for 6h (season averages move slowly)."""
+        Lets the persona gauge how much an injured/key player matters. Cached 6h per team."""
         tid = self._resolve_team_id(team_name)
         if not tid:
             return []
@@ -740,10 +724,13 @@ class WNBAStatsFetcher:
                     pass
         players: list[dict] = []
         try:
-            r = self.session.get(self._ROSTER_URL.format(tid=tid), timeout=10)
-            r.raise_for_status()
-            for a in r.json().get("athletes", []):
-                if not isinstance(a, dict):
+            for it in self._get(f"{self._CORE}/seasons/{self._season()}/teams/{tid}/athletes?limit=50").get("items", []):
+                ref = it.get("$ref")
+                if not ref:
+                    continue
+                try:
+                    a = self._get(ref)
+                except Exception:
                     continue
                 aid, name = a.get("id"), a.get("displayName")
                 if not aid or not name:
@@ -754,23 +741,19 @@ class WNBAStatsFetcher:
                 players.append({"name": name, "pos": (a.get("position") or {}).get("abbreviation", ""), **rates})
             players.sort(key=lambda p: p.get("ppg") or 0, reverse=True)
             players = players[:top_n]
-            with open(cache_file, "w") as f:
-                json.dump(players, f)
+            if players:
+                with open(cache_file, "w") as f:
+                    json.dump(players, f)
         except Exception as e:
             logger.warning(f"WNBA player stats error for {team_name}: {e}")
         return players
 
     def _fetch_player_rates(self, athlete_id) -> dict:
-        """Season per-game averages (PPG/RPG/APG/MPG) for a WNBA athlete id, from ESPN core."""
-        year = datetime.today().year
+        """Season per-game averages (PPG/RPG/APG/MPG) for a WNBA athlete id, from core API."""
         try:
-            r = self.session.get(
-                f"{self._CORE_BASE}/seasons/{year}/types/2/athletes/{athlete_id}/statistics",
-                timeout=10,
-            )
-            r.raise_for_status()
+            data = self._get(f"{self._CORE}/seasons/{self._season()}/types/2/athletes/{athlete_id}/statistics")
             flat: dict = {}
-            for cat in r.json().get("splits", {}).get("categories", []):
+            for cat in data.get("splits", {}).get("categories", []):
                 for x in cat.get("stats", []):
                     flat[x.get("name")] = x.get("value")
             if flat.get("avgPoints") is None:
@@ -785,6 +768,88 @@ class WNBAStatsFetcher:
         except Exception as e:
             logger.debug(f"WNBA player rates error ({athlete_id}): {e}")
             return {}
+
+    # ------------------------------------------------------------------
+    # Rest days (team schedule → most recent completed game before the date)
+    # ------------------------------------------------------------------
+
+    def get_rest_days(self, team_name: str, game_date: datetime) -> int | None:
+        """Days since the team's last game before game_date. 0 = back-to-back. None = n/a."""
+        tid = self._resolve_team_id(team_name)
+        if not tid:
+            return None
+        target = game_date.date() if hasattr(game_date, "date") else game_date
+        played = [d for d in self._team_game_dates(tid) if d < target]
+        return (target - max(played)).days if played else None
+
+    def _team_game_dates(self, tid: str):
+        """A team's game dates (cached 6h). Resolves the season's event $refs once."""
+        cache_file = CACHE_DIR / f"wnba_sched_{tid}.json"
+        if cache_file.exists():
+            age_hours = (time.time() - cache_file.stat().st_mtime) / 3600
+            if age_hours < self._CACHE_TTL_HOURS:
+                try:
+                    with open(cache_file) as f:
+                        return [datetime.fromisoformat(x).date() for x in json.load(f)]
+                except Exception:
+                    pass
+        dates = []
+        try:
+            for it in self._get(f"{self._CORE}/seasons/{self._season()}/teams/{tid}/events?limit=100").get("items", []):
+                ref = it.get("$ref")
+                if not ref:
+                    continue
+                try:
+                    ds = self._get(ref).get("date")
+                    if ds:
+                        dates.append(datetime.fromisoformat(ds.replace("Z", "+00:00")).date())
+                except Exception:
+                    pass
+            with open(cache_file, "w") as f:
+                json.dump([d.isoformat() for d in dates], f)
+        except Exception as e:
+            logger.warning(f"WNBA schedule fetch failed ({tid}): {e}")
+        return dates
+
+    # ------------------------------------------------------------------
+    # Injuries (core API, replaces the blocked site.api injuries feed)
+    # ------------------------------------------------------------------
+
+    def get_injuries(self, team_name: str) -> list[dict]:
+        """Team injuries as [{'player','status','detail'}] — same shape as InjuryFetcher.
+        Cached ~30min in memory."""
+        tid = self._resolve_team_id(team_name)
+        if not tid:
+            return []
+        hit = self._inj_cache.get(tid)
+        if hit and (time.time() - hit[0]) < self._INJ_TTL:
+            return hit[1]
+        out = []
+        try:
+            for it in self._get(f"{self._CORE}/teams/{tid}/injuries").get("items", []):
+                ref = it.get("$ref")
+                if not ref:
+                    continue
+                try:
+                    inj = self._get(ref)
+                except Exception:
+                    continue
+                status = inj.get("status", "")
+                detail = ((inj.get("details") or {}).get("type")
+                          or (inj.get("type") or {}).get("description") or "")
+                name = ""
+                aref = (inj.get("athlete") or {}).get("$ref")
+                if aref:
+                    try:
+                        name = self._get(aref).get("displayName", "")
+                    except Exception:
+                        pass
+                if name:
+                    out.append({"player": name, "status": status, "detail": detail})
+        except Exception as e:
+            logger.warning(f"WNBA injuries error for {team_name}: {e}")
+        self._inj_cache[tid] = (time.time(), out)
+        return out
 
 
 class MLBStatsFetcher:

@@ -402,6 +402,12 @@ def evaluate_game(game_raw: dict, sport: str, nba_fetcher: NBAStatsFetcher,
         away_injuries, away_roster = world_cup_fetcher.get_team_roster_and_injuries(away_team)
         home_stats["form"] = game.get("home_form", "")
         away_stats["form"] = game.get("away_form", "")
+    elif sport == "basketball_wnba" and wnba_fetcher is not None:
+        # WNBA injuries via the core API — site.api (used by injury_fetcher) is rate-limited.
+        home_injuries = wnba_fetcher.get_injuries(home_team)
+        away_injuries = wnba_fetcher.get_injuries(away_team)
+        home_roster   = roster_fetcher.get_roster_string(home_team, sport=sport)
+        away_roster   = roster_fetcher.get_roster_string(away_team, sport=sport)
     else:
         home_injuries = injury_fetcher.get_team_injuries(home_team, sport=sport, max_age_minutes=30)
         away_injuries = injury_fetcher.get_team_injuries(away_team, sport=sport, max_age_minutes=30)
