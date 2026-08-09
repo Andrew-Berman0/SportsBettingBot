@@ -732,6 +732,7 @@ class WNBAStatsFetcher:
                     a = self._get(ref)
                 except Exception:
                     continue
+                time.sleep(0.05)   # be polite to the core API on the cold-cache burst
                 aid, name = a.get("id"), a.get("displayName")
                 if not aid or not name:
                     continue
@@ -805,6 +806,7 @@ class WNBAStatsFetcher:
                         dates.append(datetime.fromisoformat(ds.replace("Z", "+00:00")).date())
                 except Exception:
                     pass
+                time.sleep(0.05)   # be polite to the core API on the cold-cache burst
             with open(cache_file, "w") as f:
                 json.dump([d.isoformat() for d in dates], f)
         except Exception as e:
